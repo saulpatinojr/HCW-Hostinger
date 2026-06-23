@@ -1,0 +1,29 @@
+name: Multi-Environment Deploy
+
+on:
+  push:
+    branches: [ main, staging ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Set environment
+        id: env
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "vm_id=${{ vars.HOSTINGER_VM_ID }}" >> $GITHUB_OUTPUT
+            echo "env_vars=NODE_ENV=production" >> $GITHUB_OUTPUT
+          else
+            echo "vm_id=${{ vars.STAGING_VM_ID }}" >> $GITHUB_OUTPUT
+            echo "env_vars=NODE_ENV=staging" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Deploy to Hostinger
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY }}
+          virtual-machine: ${{ steps.env.outputs.vm_id }}
+          environment-variables: ${{ steps.env.outputs.env_vars }}
