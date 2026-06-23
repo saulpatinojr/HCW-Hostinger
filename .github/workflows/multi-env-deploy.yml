@@ -10,24 +10,33 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       
-      - name: Set environment
+      - name: Set environment variables
         id: env
         run: |
           if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            VM_ID="${{ vars.HOSTINGER_VM_ID }}"
-            if [ -z "$VM_ID" ]; then VM_ID="${{ secrets.HOSTINGER_VM_ID }}"; fi
-            echo "vm_id=$VM_ID" >> $GITHUB_OUTPUT
             echo "env_vars=NODE_ENV=production" >> $GITHUB_OUTPUT
           else
-            VM_ID="${{ vars.STAGING_VM_ID }}"
-            if [ -z "$VM_ID" ]; then VM_ID="${{ secrets.STAGING_VM_ID }}"; fi
-            echo "vm_id=$VM_ID" >> $GITHUB_OUTPUT
             echo "env_vars=NODE_ENV=staging" >> $GITHUB_OUTPUT
           fi
-      
-      - name: Deploy to Hostinger
-        uses: hostinger/deploy-on-vps@v2
+
+      - name: Copy docker-compose.yml to VPS
+        uses: appleboy/scp-action@v0.1.7
         with:
-          api-key: ${{ secrets.HOSTINGER_API_KEY }}
-          virtual-machine: ${{ steps.env.outputs.vm_id }}
-          environment-variables: ${{ steps.env.outputs.env_vars }}
+          host: ${{ secrets.VPS_SSH_HOST }}
+          username: ${{ secrets.VPS_SSH_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "docker-compose.yml"
+          target: "~/app"
+
+      - name: Run Docker Compose on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_SSH_HOST }}
+          username: ${{ secrets.VPS_SSH_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ~/app
+            export ${{ steps.env.outputs.env_vars }}
+            # For older docker versions it might be docker-compose, but we will use the modern one
+            docker compose down || true
+            docker compose up -d
