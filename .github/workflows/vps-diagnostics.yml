@@ -1,0 +1,47 @@
+name: VPS Diagnostics
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: VPS State Report
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_SSH_HOST }}
+          username: ${{ secrets.VPS_SSH_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            echo "====== SYSTEM ======"
+            uname -a
+            uptime
+            echo ""
+
+            echo "====== RESOURCES ======"
+            df -h
+            echo ""
+            free -h
+            echo ""
+
+            echo "====== DOCKER ======"
+            docker --version 2>/dev/null || echo "Docker not installed"
+            docker compose version 2>/dev/null || echo "Docker Compose not installed"
+            echo ""
+            docker ps -a 2>/dev/null || echo "Docker not running"
+            echo ""
+
+            echo "====== GITHUB RUNNER ======"
+            if systemctl list-units --type=service | grep -q "actions.runner"; then
+              systemctl list-units --type=service | grep "actions.runner"
+              echo ""
+              journalctl -u 'actions.runner.*' --no-pager -n 20
+            else
+              echo "No GitHub Actions runner service found"
+              ls /opt/github-runner 2>/dev/null || echo "Runner not installed at /opt/github-runner"
+            fi
+            echo ""
+
+            echo "====== NETWORK ======"
+            ss -tlnp | grep -E '80|443|22' || true
