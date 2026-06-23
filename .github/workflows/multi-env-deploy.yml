@@ -6,10 +6,10 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v5
-      
+      - uses: actions/checkout@v4
+
       - name: Set environment variables
         id: env
         run: |
@@ -19,24 +19,9 @@ jobs:
             echo "env_vars=NODE_ENV=staging" >> $GITHUB_OUTPUT
           fi
 
-      - name: Copy docker-compose.yml to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_SSH_HOST }}
-          username: ${{ secrets.VPS_SSH_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: "docker-compose.yml"
-          target: "~/app"
-
-      - name: Run Docker Compose on VPS
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_SSH_HOST }}
-          username: ${{ secrets.VPS_SSH_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            cd ~/app
-            export ${{ steps.env.outputs.env_vars }}
-            # For older docker versions it might be docker-compose, but we will use the modern one
-            docker compose down || true
-            docker compose up -d
+      - name: Deploy with Docker Compose
+        run: |
+          export ${{ steps.env.outputs.env_vars }}
+          docker compose down || true
+          docker compose up -d
+          docker compose ps
