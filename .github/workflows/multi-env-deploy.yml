@@ -14,10 +14,14 @@ jobs:
         id: env
         run: |
           if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "vm_id=${{ vars.HOSTINGER_VM_ID }}" >> $GITHUB_OUTPUT
+            VM_ID="${{ vars.HOSTINGER_VM_ID }}"
+            if [ -z "$VM_ID" ]; then VM_ID="${{ secrets.HOSTINGER_VM_ID }}"; fi
+            echo "vm_id=$VM_ID" >> $GITHUB_OUTPUT
             echo "env_vars=NODE_ENV=production" >> $GITHUB_OUTPUT
           else
-            echo "vm_id=${{ vars.STAGING_VM_ID }}" >> $GITHUB_OUTPUT
+            VM_ID="${{ vars.STAGING_VM_ID }}"
+            if [ -z "$VM_ID" ]; then VM_ID="${{ secrets.STAGING_VM_ID }}"; fi
+            echo "vm_id=$VM_ID" >> $GITHUB_OUTPUT
             echo "env_vars=NODE_ENV=staging" >> $GITHUB_OUTPUT
           fi
       
