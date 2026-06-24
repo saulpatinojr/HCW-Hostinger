@@ -1,0 +1,7 @@
+---
+- name: Verify runner service
+  ansible.builtin.command:
+    cmd: "{{ github_runner_dir }}/svc.sh status"
+  args:
+    chdir: "{{ github_runner_dir }}"
+  changed_when: false

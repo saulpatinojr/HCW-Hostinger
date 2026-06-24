@@ -1,0 +1,10 @@
+---
+- name: Provision VPS
+  hosts: vps
+  become: true
+  gather_facts: true
+
+  roles:
+    - common
+    - docker
+    - github_runner

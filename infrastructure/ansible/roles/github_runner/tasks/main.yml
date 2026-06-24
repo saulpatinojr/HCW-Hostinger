@@ -1,0 +1,132 @@
+---
+- name: Create runner user
+  ansible.builtin.user:
+    name: "{{ github_runner_user }}"
+    system: true
+    create_home: true
+    shell: /bin/bash
+
+- name: Add runner user to docker group
+  ansible.builtin.user:
+    name: "{{ github_runner_user }}"
+    groups: docker
+    append: true
+
+- name: Create runner directory
+  ansible.builtin.file:
+    path: "{{ github_runner_dir }}"
+    state: directory
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+    mode: "0755"
+
+- name: Check if runner already downloaded
+  ansible.builtin.stat:
+    path: "{{ github_runner_dir }}/run.sh"
+  register: runner_binary
+
+- name: Download GitHub Actions runner
+  ansible.builtin.get_url:
+    url: "https://github.com/actions/runner/releases/download/v{{ github_runner_version }}/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz"
+    dest: "/tmp/actions-runner.tar.gz"
+    mode: "0644"
+  when: not runner_binary.stat.exists
+
+- name: Extract runner archive
+  ansible.builtin.unarchive:
+    src: /tmp/actions-runner.tar.gz
+    dest: "{{ github_runner_dir }}"
+    remote_src: true
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+  when: not runner_binary.stat.exists
+
+- name: Install runner dependencies
+  ansible.builtin.command:
+    cmd: "{{ github_runner_dir }}/bin/installdependencies.sh"
+  changed_when: true
+
+# --- GitHub App → registration token ---
+
+- name: Write GitHub App private key to temp file
+  ansible.builtin.copy:
+    content: "{{ github_app_private_key | b64decode }}"
+    dest: /tmp/gh_app_key.pem
+    mode: "0600"
+  no_log: true
+
+- name: Generate GitHub App JWT and fetch runner registration token
+  ansible.builtin.shell: |
+    set -euo pipefail
+
+    APP_ID="{{ github_app_id }}"
+    INSTALLATION_ID="{{ github_app_installation_id }}"
+    REPO="{{ github_repo }}"
+
+    NOW=$(date +%s)
+    EXP=$((NOW + 540))
+
+    HEADER=$(printf '{"alg":"RS256","typ":"JWT"}' | base64 -w0 | tr '+/' '-_' | tr -d '=')
+    PAYLOAD=$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' "$NOW" "$EXP" "$APP_ID" | base64 -w0 | tr '+/' '-_' | tr -d '=')
+
+    SIG=$(printf '%s.%s' "$HEADER" "$PAYLOAD" \
+          | openssl dgst -sha256 -sign /tmp/gh_app_key.pem \
+          | base64 -w0 | tr '+/' '-_' | tr -d '=')
+
+    JWT="${HEADER}.${PAYLOAD}.${SIG}"
+
+    INSTALL_TOKEN=$(curl -sf \
+      -H "Authorization: Bearer $JWT" \
+      -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/app/installations/${INSTALLATION_ID}/access_tokens" \
+      | jq -r '.token')
+
+    curl -sf \
+      -X POST \
+      -H "Authorization: Bearer $INSTALL_TOKEN" \
+      -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${REPO}/actions/runners/registration-token" \
+      | jq -r '.token'
+  register: runner_token_result
+  no_log: true
+  changed_when: false
+
+- name: Remove GitHub App private key temp file
+  ansible.builtin.file:
+    path: /tmp/gh_app_key.pem
+    state: absent
+
+- name: Check if runner is already configured
+  ansible.builtin.stat:
+    path: "{{ github_runner_dir }}/.runner"
+  register: runner_config
+
+- name: Configure runner
+  ansible.builtin.command:
+    cmd: >
+      {{ github_runner_dir }}/config.sh
+      --url https://github.com/{{ github_repo }}
+      --token {{ runner_token_result.stdout | trim }}
+      --name {{ github_runner_name }}
+      --labels {{ github_runner_labels }}
+      --work _work
+      --unattended
+      --replace
+  become_user: "{{ github_runner_user }}"
+  when: not runner_config.stat.exists
+  no_log: true
+
+- name: Install runner as systemd service
+  ansible.builtin.command:
+    cmd: "{{ github_runner_dir }}/svc.sh install {{ github_runner_user }}"
+  args:
+    chdir: "{{ github_runner_dir }}"
+  changed_when: true
+
+- name: Start runner service
+  ansible.builtin.command:
+    cmd: "{{ github_runner_dir }}/svc.sh start"
+  args:
+    chdir: "{{ github_runner_dir }}"
+  changed_when: true
+  notify: Verify runner service
