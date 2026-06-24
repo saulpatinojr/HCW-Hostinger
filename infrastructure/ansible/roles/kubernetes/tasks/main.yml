@@ -1,0 +1,82 @@
+---
+# kind — runs each k8s node as a Docker container
+- name: Check if kind is installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/kind
+  register: kind_bin
+
+- name: Install kind
+  ansible.builtin.get_url:
+    url: "https://kind.sigs.k8s.io/dl/v{{ kind_version }}/kind-linux-amd64"
+    dest: /usr/local/bin/kind
+    mode: "0755"
+  when: not kind_bin.stat.exists
+
+# k3d — runs k3s (lightweight k8s) nodes as Docker containers
+- name: Check if k3d is installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3d
+  register: k3d_bin
+
+- name: Install k3d
+  ansible.builtin.shell:
+    cmd: |
+      curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh \
+        | TAG=v{{ k3d_version }} bash
+  when: not k3d_bin.stat.exists
+  changed_when: true
+
+# kubectl — CLI for both kind and k3d clusters
+- name: Resolve latest stable kubectl version
+  ansible.builtin.uri:
+    url: https://dl.k8s.io/release/stable.txt
+    return_content: true
+  register: kubectl_stable
+  when: kubectl_version == "stable"
+
+- name: Set kubectl version fact
+  ansible.builtin.set_fact:
+    _kubectl_version: "{{ kubectl_stable.content | trim if kubectl_version == 'stable' else kubectl_version }}"
+
+- name: Check if kubectl is installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/kubectl
+  register: kubectl_bin
+
+- name: Install kubectl
+  ansible.builtin.get_url:
+    url: "https://dl.k8s.io/release/{{ _kubectl_version }}/bin/linux/amd64/kubectl"
+    dest: /usr/local/bin/kubectl
+    mode: "0755"
+  when: not kubectl_bin.stat.exists
+
+# helm — package manager for k8s
+- name: Check if helm is installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/helm
+  register: helm_bin
+
+- name: Install helm
+  ansible.builtin.shell:
+    cmd: curl -s https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  when: not helm_bin.stat.exists
+  changed_when: true
+
+- name: Verify tool installations
+  ansible.builtin.command:
+    cmd: "{{ item }} version --short 2>/dev/null || {{ item }} version"
+  loop:
+    - kind
+    - k3d
+    - kubectl
+    - helm
+  changed_when: false
+  failed_when: false
+  register: tool_versions
+
+- name: Show installed k8s tool versions
+  ansible.builtin.debug:
+    msg: "{{ item.stdout | default(item.stderr) }}"
+  loop: "{{ tool_versions.results }}"
+  loop_control:
+    label: "{{ item.item }}"

@@ -1,0 +1,22 @@
+services:
+  runner:
+    image: myoung34/github-runner:latest
+    restart: unless-stopped
+    environment:
+      RUNNER_SCOPE: repo
+      REPO_URL: "https://github.com/{{ github_repo }}"
+      APP_ID: "{{ github_app_id }}"
+      APP_LOGIN: "{{ github_repo.split('/')[0] }}"
+      APP_PRIVATE_KEY: |
+{{ github_app_private_key | b64decode | indent(8, first=True) }}
+      RUNNER_NAME: "{{ github_runner_name }}"
+      LABELS: "{{ github_runner_labels }}"
+      RUNNER_WORKDIR: /tmp/runner/work
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner_work:/tmp/runner
+    # Needed so the runner can spin up kind clusters for training
+    privileged: true
+
+volumes:
+  runner_work:

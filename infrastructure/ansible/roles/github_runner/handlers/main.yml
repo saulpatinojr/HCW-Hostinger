@@ -1,7 +1,10 @@
 ---
-- name: Verify runner service
-  ansible.builtin.command:
-    cmd: "{{ github_runner_dir }}/svc.sh status"
-  args:
-    chdir: "{{ github_runner_dir }}"
-  changed_when: false
+- name: Verify runner container
+  community.docker.docker_compose_v2:
+    project_src: /opt/github-runner
+    state: present
+  register: runner_status
+
+- name: Show runner status
+  ansible.builtin.debug:
+    msg: "Runner container state: {{ runner_status.services.runner.State.Status | default('unknown') }}"
