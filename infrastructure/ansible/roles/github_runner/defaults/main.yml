@@ -1,6 +1,4 @@
 ---
-github_runner_user: github-runner
 github_runner_dir: /opt/github-runner
-github_runner_version: "2.321.0"
 github_runner_name: "{{ ansible_hostname }}"
 github_runner_labels: "self-hosted,linux"
