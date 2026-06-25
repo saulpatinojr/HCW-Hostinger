@@ -18,6 +18,8 @@ jobs:
   terraform:
     name: Terraform ${{ inputs.tf_action }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       vps_ip: ${{ steps.tf_output.outputs.vps_ip }}
     steps:
