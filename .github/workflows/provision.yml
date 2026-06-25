@@ -58,7 +58,7 @@ jobs:
 
       - name: Capture Terraform outputs
         id: tf_output
-        if: inputs.tf_action != 'destroy'
+        if: inputs.tf_action == 'apply'
         run: |
           echo "vps_ip=$(terraform output -raw vps_ip)" >> $GITHUB_OUTPUT
         working-directory: ${{ env.TF_DIR }}
