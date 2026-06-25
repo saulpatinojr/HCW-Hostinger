@@ -43,7 +43,12 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
 
       - name: Terraform ${{ inputs.tf_action }}
-        run: terraform ${{ inputs.tf_action }} -auto-approve
+        run: |
+          if [ "${{ inputs.tf_action }}" = "plan" ]; then
+            terraform plan
+          else
+            terraform ${{ inputs.tf_action }} -auto-approve
+          fi
         working-directory: ${{ env.TF_DIR }}
         env:
           TF_VAR_hostinger_api_key: ${{ secrets.HOSTINGER_API_KEY }}
