@@ -1,0 +1,25 @@
+---
+- name: Create runner directory
+  ansible.builtin.file:
+    path: /opt/github-runner
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write runner docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/github-runner/docker-compose.yml
+    mode: "0644"
+
+- name: Pull latest runner image
+  community.docker.docker_compose_v2_pull:
+    project_src: /opt/github-runner
+
+- name: Start runner container
+  community.docker.docker_compose_v2:
+    project_src: /opt/github-runner
+    state: present
+    recreate: auto
+  notify: Verify runner container

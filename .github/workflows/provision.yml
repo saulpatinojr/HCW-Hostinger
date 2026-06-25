@@ -1,0 +1,111 @@
+name: Provision VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      tf_action:
+        description: "Terraform action"
+        required: true
+        default: apply
+        type: choice
+        options: [plan, apply, destroy]
+
+env:
+  TF_DIR: infrastructure/terraform
+  ANSIBLE_DIR: infrastructure/ansible
+
+jobs:
+  terraform:
+    name: Terraform ${{ inputs.tf_action }}
+    runs-on: ubuntu-latest
+    outputs:
+      vps_ip: ${{ steps.tf_output.outputs.vps_ip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore Terraform state
+        run: |
+          if git show origin/tf-state:terraform.tfstate 2>/dev/null; then
+            git fetch origin tf-state
+            git show origin/tf-state:terraform.tfstate > $TF_DIR/terraform.tfstate
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Terraform ${{ inputs.tf_action }}
+        run: terraform ${{ inputs.tf_action }} -auto-approve
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_hostinger_api_key: ${{ secrets.HOSTINGER_API_KEY }}
+          TF_VAR_vm_id: ${{ vars.HOSTINGER_VM_ID }}
+          TF_VAR_vps_ip: ${{ secrets.VPS_SSH_HOST }}
+          TF_VAR_ssh_user: ${{ secrets.VPS_SSH_USERNAME }}
+
+      - name: Capture Terraform outputs
+        id: tf_output
+        if: inputs.tf_action != 'destroy'
+        run: |
+          echo "vps_ip=$(terraform output -raw vps_ip)" >> $GITHUB_OUTPUT
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Commit Terraform state to tf-state branch
+        if: inputs.tf_action != 'plan'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin tf-state 2>/dev/null || true
+
+          # Orphan branch to keep state separate from working tree
+          if ! git rev-parse --verify origin/tf-state &>/dev/null; then
+            git checkout --orphan tf-state
+            git rm -rf . --quiet
+          else
+            git checkout tf-state
+          fi
+
+          cp $TF_DIR/terraform.tfstate terraform.tfstate
+          git add terraform.tfstate
+          git diff --cached --quiet || git commit -m "chore: update terraform state [skip ci]"
+          git push origin tf-state
+          git checkout -
+
+  ansible:
+    name: Ansible provision
+    needs: terraform
+    if: inputs.tf_action == 'apply'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write SSH private key
+        run: |
+          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > /tmp/vps_key
+          chmod 600 /tmp/vps_key
+
+      - name: Install Ansible
+        run: |
+          pip install --quiet ansible
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+        working-directory: ${{ env.ANSIBLE_DIR }}
+
+      - name: Run playbook
+        run: |
+          ansible-playbook site.yml \
+            --private-key /tmp/vps_key \
+            -e "github_app_id=${{ secrets.GH_APP_ID }}" \
+            -e "github_app_installation_id=${{ secrets.GH_APP_INSTALLATION_ID }}" \
+            -e "github_app_private_key=${{ secrets.GH_APP_PRIVATE_KEY }}" \
+            -e "github_repo=${{ github.repository }}"
+        working-directory: ${{ env.ANSIBLE_DIR }}

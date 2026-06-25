@@ -1,0 +1,4 @@
+---
+kind_version: "0.24.0"
+kubectl_version: "stable"   # resolves to latest stable via dl.k8s.io
+k3d_version: "5.7.4"
