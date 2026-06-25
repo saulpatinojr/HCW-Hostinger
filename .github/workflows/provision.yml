@@ -70,6 +70,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          ORIG_BRANCH=$(git symbolic-ref --short HEAD)
           git fetch origin tf-state 2>/dev/null || true
 
           # Orphan branch to keep state separate from working tree
@@ -84,7 +85,7 @@ jobs:
           git add terraform.tfstate
           git diff --cached --quiet || git commit -m "chore: update terraform state [skip ci]"
           git push origin tf-state
-          git checkout -
+          git checkout "$ORIG_BRANCH"
 
   ansible:
     name: Ansible provision
