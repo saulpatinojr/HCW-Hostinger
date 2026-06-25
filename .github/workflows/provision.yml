@@ -100,6 +100,18 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > /tmp/vps_key
           chmod 600 /tmp/vps_key
 
+      - name: Generate Ansible inventory
+        run: |
+          mkdir -p ${{ env.ANSIBLE_DIR }}/inventory
+          cat > ${{ env.ANSIBLE_DIR }}/inventory/hosts.yml << 'EOF'
+          all:
+            hosts:
+              vps:
+                ansible_host: ${{ secrets.VPS_SSH_HOST }}
+                ansible_user: ${{ secrets.VPS_SSH_USERNAME }}
+                ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+          EOF
+
       - name: Install Ansible
         run: |
           pip install --quiet ansible
