@@ -18,5 +18,5 @@ terraform {
 }
 
 provider "hostinger" {
-  api_key = var.hostinger_api_key
+  api_token = var.hostinger_api_key
 }
