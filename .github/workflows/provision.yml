@@ -45,6 +45,18 @@ jobs:
         run: terraform init
         working-directory: ${{ env.TF_DIR }}
 
+      # The Hostinger provider doesn't support firewall resources, so purge any
+      # leftover entries from the restored tf-state. `|| true` keeps the step
+      # green when the entries are already absent (fresh state, re-runs).
+      - name: Prune unsupported firewall resources from state
+        run: |
+          for r in hostinger_vps_firewall_rule.ssh \
+                   hostinger_vps_firewall_rule.http \
+                   hostinger_vps_firewall_rule.https; do
+            terraform state rm "$r" 2>/dev/null || true
+          done
+        working-directory: ${{ env.TF_DIR }}
+
       - name: Terraform ${{ inputs.tf_action }}
         run: |
           if [ "${{ inputs.tf_action }}" = "plan" ]; then
