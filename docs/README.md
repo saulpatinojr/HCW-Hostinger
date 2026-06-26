@@ -2,7 +2,7 @@
 
 ## Blog posts
 
-Vendor-targeted educational posts about replacing GitHub-hosted runners with a self-hosted runner on a $8/mo Hostinger VPS, and adding Docker visibility. Each angles the same project for a different developer audience.
+Vendor-targeted educational posts about replacing GitHub-hosted runners with a self-hosted runner on a $8/mo Hostinger VPS. Each angles the same project for a different developer audience.
 
 ### Series 1: Self-hosted runner setup
 
@@ -20,6 +20,15 @@ Vendor-targeted educational posts about replacing GitHub-hosted runners with a s
 | 5 | Terraform / IaC | [Closing the loop between declared and running infrastructure](./blog/05-terraform-infrastructure-visibility.md) |
 | 6 | GitHub Actions | [Verifying your self-hosted runner is healthy](./blog/06-github-actions-vps-diagnostics.md) |
 
+### Series 3: Docker deep dive
+
+| # | Audience | Post |
+|---|---|---|
+| 7 | Terraform / IaC | [Outgrow the git state trick — migrate to Terraform Cloud](./blog/07-terraform-cloud-state-backend.md) |
+| 8 | Docker | [Why Docker Compose is the right deployment unit](./blog/08-docker-compose-as-deployment-unit.md) |
+| 9 | Docker / Security | [What you trade away with the Docker socket and privileged mode](./blog/09-docker-socket-volumes-security.md) |
+| 10 | Docker / Developer Experience | [Manage your VPS Docker from your laptop in 2 minutes](./blog/10-remote-docker-desktop-ssh-context.md) |
+
 ## Architecture Decision Records
 
 | ADR | Decision |
@@ -34,3 +43,7 @@ Vendor-targeted educational posts about replacing GitHub-hosted runners with a s
 | [0008](./adr/0008-idempotent-playbook-design.md) | All Ansible tasks must be idempotent |
 | [0009](./adr/0009-deploy-workflow-concurrency-and-timeouts.md) | Deploy workflow has a concurrency guard and explicit timeouts |
 | [0010](./adr/0010-portainer-ce-for-docker-visibility.md) | Portainer CE deployed as a Docker container, accessed via SSH tunnel |
+| [0011](./adr/0011-terraform-cloud-as-future-state-backend.md) | Terraform Cloud (HCP Terraform) as future state backend |
+| [0012](./adr/0012-docker-compose-v2-plugin.md) | Docker Compose V2 plugin, not standalone docker-compose v1 |
+| [0013](./adr/0013-docker-socket-security-model.md) | Docker socket mounting — accepted risk with documented upgrade path |
+| [0014](./adr/0014-named-volumes-and-restart-policy.md) | Named volumes for persistent data; `restart: unless-stopped` policy |
