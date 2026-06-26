@@ -3,6 +3,13 @@ name: Multi-Environment Deploy
 on:
   push:
     branches: [ main, staging ]
+  workflow_dispatch:
+
+# Cancel any in-flight run for the same branch so pushes don't queue
+# up behind a stalled job waiting for a runner.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deploy:
