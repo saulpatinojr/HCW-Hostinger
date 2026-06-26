@@ -6,8 +6,9 @@ on:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Decode SSH key
+      - name: Write SSH private key
         run: |
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > /tmp/vps_key
           chmod 600 /tmp/vps_key
@@ -38,13 +39,17 @@ jobs:
             echo ""
 
             echo "====== GITHUB RUNNER ======"
-            if systemctl list-units --type=service | grep -q "actions.runner"; then
-              systemctl list-units --type=service | grep "actions.runner"
+            RUNNER_ID=$(docker ps -q --filter "name=github-runner" 2>/dev/null | head -1)
+            if [ -n "$RUNNER_ID" ]; then
+              echo "Runner container is UP:"
+              docker ps --filter "name=github-runner" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
               echo ""
-              journalctl -u 'actions.runner.*' --no-pager -n 20
+              echo "Recent runner logs:"
+              docker logs --tail 20 "$RUNNER_ID" 2>&1
             else
-              echo "No GitHub Actions runner service found"
-              ls /opt/github-runner 2>/dev/null || echo "Runner not installed at /opt/github-runner"
+              echo "Runner container not found or not running"
+              echo "All containers:"
+              docker ps -a 2>/dev/null || true
             fi
             echo ""
 

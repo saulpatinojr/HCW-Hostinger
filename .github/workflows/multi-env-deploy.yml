@@ -14,21 +14,17 @@ concurrency:
 jobs:
   deploy:
     runs-on: self-hosted
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set environment variables
-        id: env
-        run: |
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "env_vars=NODE_ENV=production" >> $GITHUB_OUTPUT
-          else
-            echo "env_vars=NODE_ENV=staging" >> $GITHUB_OUTPUT
-          fi
-
       - name: Deploy with Docker Compose
+        # Pull new images first, then recreate changed containers in place.
+        # --remove-orphans cleans up containers for services removed from compose.
+        # No `down` step means zero unnecessary downtime.
+        env:
+          NODE_ENV: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
         run: |
-          export ${{ steps.env.outputs.env_vars }}
-          docker compose down || true
-          docker compose up -d
+          docker compose pull
+          docker compose up -d --remove-orphans
           docker compose ps

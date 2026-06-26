@@ -30,7 +30,8 @@ jobs:
 
       - name: Restore Terraform state
         run: |
-          if git show origin/tf-state:terraform.tfstate 2>/dev/null; then
+          # Use cat-file -e to check existence without printing state content to logs
+          if git cat-file -e origin/tf-state:terraform.tfstate 2>/dev/null; then
             git fetch origin tf-state
             git show origin/tf-state:terraform.tfstate > $TF_DIR/terraform.tfstate
           fi
