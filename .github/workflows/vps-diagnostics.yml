@@ -57,5 +57,18 @@ jobs:
             fi
             echo ""
 
+            echo "====== PORTAINER ======"
+            PORTAINER_ID=$(docker ps -q --filter "name=portainer" 2>/dev/null | head -1)
+            if [ -n "$PORTAINER_ID" ]; then
+              echo "Portainer container is UP:"
+              docker ps --filter "name=portainer" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+              echo ""
+              echo "Access via SSH tunnel: ssh -L 9443:localhost:9443 <user>@<vps_ip> -N"
+              echo "Then open: https://localhost:9443"
+            else
+              echo "Portainer container not found or not running"
+            fi
+            echo ""
+
             echo "====== NETWORK ======"
-            ss -tlnp | grep -E '80|443|22' || true
+            ss -tlnp | grep -E '80|443|22|9443' || true

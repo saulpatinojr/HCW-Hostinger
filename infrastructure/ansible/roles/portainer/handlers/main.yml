@@ -1,0 +1,6 @@
+---
+- name: Verify portainer container
+  community.docker.docker_container_info:
+    name: portainer-portainer-1
+  register: _portainer_info
+  failed_when: not _portainer_info.exists or _portainer_info.container['State']['Status'] != 'running'
