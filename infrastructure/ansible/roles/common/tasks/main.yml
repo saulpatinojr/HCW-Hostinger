@@ -1,9 +1,23 @@
 ---
-- name: Update apt cache and upgrade packages
+- name: Update apt cache and dist-upgrade all packages
   ansible.builtin.apt:
     update_cache: true
     upgrade: dist
-    cache_valid_time: 3600
+    cache_valid_time: 0    # always refresh — we want the very latest
+    autoremove: true
+
+- name: Check if a reboot is required after upgrade
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: _reboot_required
+
+# Reboots the host, waits up to 5 minutes for SSH to come back, then
+# resumes the play — equivalent to "stop, wait for VPS to reboot, continue".
+- name: Reboot if OS upgrade requires it
+  ansible.builtin.reboot:
+    reboot_timeout: 300
+    msg: "Rebooting after OS upgrade"
+  when: _reboot_required.stat.exists
 
 - name: Install base packages
   ansible.builtin.apt:

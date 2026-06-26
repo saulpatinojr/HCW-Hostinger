@@ -19,9 +19,3 @@ variable "ssh_user" {
   type        = string
   default     = "root"
 }
-
-variable "allowed_ssh_cidr" {
-  description = "CIDR allowed to SSH. Restrict to your IP for hardening."
-  type        = string
-  default     = "0.0.0.0/0"
-}

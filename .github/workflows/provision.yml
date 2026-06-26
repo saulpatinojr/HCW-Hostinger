@@ -18,6 +18,7 @@ jobs:
   terraform:
     name: Terraform ${{ inputs.tf_action }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     outputs:
@@ -42,6 +43,18 @@ jobs:
 
       - name: Terraform init
         run: terraform init
+        working-directory: ${{ env.TF_DIR }}
+
+      # The Hostinger provider doesn't support firewall resources, so purge any
+      # leftover entries from the restored tf-state. `|| true` keeps the step
+      # green when the entries are already absent (fresh state, re-runs).
+      - name: Prune unsupported firewall resources from state
+        run: |
+          for r in hostinger_vps_firewall_rule.ssh \
+                   hostinger_vps_firewall_rule.http \
+                   hostinger_vps_firewall_rule.https; do
+            terraform state rm "$r" 2>/dev/null || true
+          done
         working-directory: ${{ env.TF_DIR }}
 
       - name: Terraform ${{ inputs.tf_action }}
@@ -92,6 +105,8 @@ jobs:
     needs: terraform
     if: inputs.tf_action == 'apply'
     runs-on: ubuntu-latest
+    # Generous timeout: covers dist-upgrade + optional reboot wait (≤5 min) + all roles
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -113,14 +128,16 @@ jobs:
           EOF
 
       - name: Install Ansible
-        run: |
-          pip install --quiet ansible
+        run: pip install --quiet ansible
 
       - name: Install Ansible collections
         run: ansible-galaxy collection install -r requirements.yml
         working-directory: ${{ env.ANSIBLE_DIR }}
 
       - name: Run playbook
+        # Playbook is fully idempotent — safe to re-run at any point.
+        # If a dist-upgrade requires a kernel reboot, Ansible reboots the VPS
+        # and waits up to 5 minutes for SSH to recover before continuing.
         run: |
           ansible-playbook site.yml \
             --private-key /tmp/vps_key \

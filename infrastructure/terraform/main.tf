@@ -1,7 +1,7 @@
-# Firewall is managed by UFW via Ansible (common role).
-# Terraform only generates the Ansible inventory here.
+# Firewall is managed by UFW via Ansible (common role) — the Hostinger
+# provider v0.1.x doesn't expose a firewall resource. Terraform here is
+# only responsible for generating the Ansible inventory.
 
-# Write the Ansible inventory so the playbook always targets the right host.
 resource "local_file" "ansible_inventory" {
   filename        = "${path.module}/../ansible/inventory/hosts.yml"
   file_permission = "0644"
