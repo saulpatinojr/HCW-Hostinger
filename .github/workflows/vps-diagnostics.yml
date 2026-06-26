@@ -9,16 +9,18 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Write SSH private key
+        # $RUNNER_TEMP is mounted into the appleboy/ssh-action container as
+        # /github/runner_temp — /tmp is NOT mounted, so key_path must point here.
         run: |
-          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > /tmp/vps_key
-          chmod 600 /tmp/vps_key
+          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > "$RUNNER_TEMP/vps_key"
+          chmod 600 "$RUNNER_TEMP/vps_key"
 
       - name: VPS State Report
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_SSH_HOST }}
           username: ${{ secrets.VPS_SSH_USERNAME }}
-          key_path: /tmp/vps_key
+          key_path: /github/runner_temp/vps_key
           script: |
             echo "====== SYSTEM ======"
             uname -a
