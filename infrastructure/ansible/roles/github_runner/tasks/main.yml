@@ -12,12 +12,13 @@
     src: docker-compose.yml.j2
     dest: /opt/github-runner/docker-compose.yml
     mode: "0644"
+  register: _compose_changed
 
 - name: Pull latest runner image
   community.docker.docker_compose_v2_pull:
     project_src: /opt/github-runner
 
-- name: Start runner container
+- name: Start (or recreate if config changed) runner container
   community.docker.docker_compose_v2:
     project_src: /opt/github-runner
     state: present

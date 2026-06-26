@@ -18,6 +18,9 @@ jobs:
   terraform:
     name: Terraform ${{ inputs.tf_action }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
     outputs:
       vps_ip: ${{ steps.tf_output.outputs.vps_ip }}
     steps:
@@ -43,7 +46,12 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
 
       - name: Terraform ${{ inputs.tf_action }}
-        run: terraform ${{ inputs.tf_action }} -auto-approve
+        run: |
+          if [ "${{ inputs.tf_action }}" = "plan" ]; then
+            terraform plan
+          else
+            terraform ${{ inputs.tf_action }} -auto-approve
+          fi
         working-directory: ${{ env.TF_DIR }}
         env:
           TF_VAR_hostinger_api_key: ${{ secrets.HOSTINGER_API_KEY }}
@@ -53,7 +61,7 @@ jobs:
 
       - name: Capture Terraform outputs
         id: tf_output
-        if: inputs.tf_action != 'destroy'
+        if: inputs.tf_action == 'apply'
         run: |
           echo "vps_ip=$(terraform output -raw vps_ip)" >> $GITHUB_OUTPUT
         working-directory: ${{ env.TF_DIR }}
@@ -63,6 +71,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          ORIG_BRANCH=$(git symbolic-ref --short HEAD)
           git fetch origin tf-state 2>/dev/null || true
 
           # Orphan branch to keep state separate from working tree
@@ -77,13 +86,15 @@ jobs:
           git add terraform.tfstate
           git diff --cached --quiet || git commit -m "chore: update terraform state [skip ci]"
           git push origin tf-state
-          git checkout -
+          git checkout "$ORIG_BRANCH"
 
   ansible:
     name: Ansible provision
     needs: terraform
     if: inputs.tf_action == 'apply'
     runs-on: ubuntu-latest
+    # Generous timeout: covers dist-upgrade + optional reboot wait (≤5 min) + all roles
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -92,15 +103,29 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > /tmp/vps_key
           chmod 600 /tmp/vps_key
 
-      - name: Install Ansible
+      - name: Generate Ansible inventory
         run: |
-          pip install --quiet ansible
+          mkdir -p ${{ env.ANSIBLE_DIR }}/inventory
+          cat > ${{ env.ANSIBLE_DIR }}/inventory/hosts.yml << 'EOF'
+          all:
+            hosts:
+              vps:
+                ansible_host: ${{ secrets.VPS_SSH_HOST }}
+                ansible_user: ${{ secrets.VPS_SSH_USERNAME }}
+                ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+          EOF
+
+      - name: Install Ansible
+        run: pip install --quiet ansible
 
       - name: Install Ansible collections
         run: ansible-galaxy collection install -r requirements.yml
         working-directory: ${{ env.ANSIBLE_DIR }}
 
       - name: Run playbook
+        # Playbook is fully idempotent — safe to re-run at any point.
+        # If a dist-upgrade requires a kernel reboot, Ansible reboots the VPS
+        # and waits up to 5 minutes for SSH to recover before continuing.
         run: |
           ansible-playbook site.yml \
             --private-key /tmp/vps_key \
