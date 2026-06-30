@@ -4,3 +4,4 @@ terraform.tfstate.backup
 *.tfvars
 !*.tfvars.example
 .terraform.lock.hcl
+!vault-config/.terraform.lock.hcl

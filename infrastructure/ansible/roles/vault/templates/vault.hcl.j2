@@ -1,0 +1,13 @@
+storage "file" {
+  path = "{{ vault_data_dir }}"
+}
+
+listener "tcp" {
+  address     = "{{ vault_listen_address }}:{{ vault_listen_port }}"
+  tls_disable = 1
+}
+
+ui = {{ vault_ui_enabled | ternary('true', 'false') }}
+disable_mlock = {{ vault_disable_mlock | ternary('true', 'false') }}
+api_addr = "{{ vault_api_addr }}"
+cluster_addr = "{{ vault_cluster_addr }}"

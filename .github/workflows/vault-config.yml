@@ -1,0 +1,131 @@
+name: Vault Config
+
+on:
+  workflow_dispatch:
+    inputs:
+      tf_action:
+        description: "Terraform action"
+        required: true
+        default: plan
+        type: choice
+        options: [validate, plan, apply, destroy]
+
+env:
+  TF_DIR: infrastructure/terraform/vault-config
+  TF_STATE_BRANCH: tf-state
+  TF_STATE_PATH: vault-config/terraform.tfstate
+  VAULT_TUNNEL_ADDR: http://127.0.0.1:8200
+
+jobs:
+  vault-config:
+    name: Vault Config ${{ inputs.tf_action }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore Terraform state
+        run: |
+          git fetch origin ${{ env.TF_STATE_BRANCH }} 2>/dev/null || true
+          if git cat-file -e origin/${{ env.TF_STATE_BRANCH }}:${{ env.TF_STATE_PATH }} 2>/dev/null; then
+            mkdir -p "$TF_DIR"
+            git show origin/${{ env.TF_STATE_BRANCH }}:${{ env.TF_STATE_PATH }} > "$TF_DIR/terraform.tfstate"
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Terraform validate
+        run: terraform validate
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Write SSH private key
+        if: inputs.tf_action != 'validate'
+        run: |
+          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > "$RUNNER_TEMP/vps_key"
+          chmod 600 "$RUNNER_TEMP/vps_key"
+
+      - name: Open SSH tunnel to Vault
+        if: inputs.tf_action != 'validate'
+        run: |
+          ssh -f -N \
+            -L 8200:127.0.0.1:8200 \
+            -i "$RUNNER_TEMP/vps_key" \
+            -o ExitOnForwardFailure=yes \
+            -o ServerAliveInterval=30 \
+            -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_SSH_USERNAME }}@${{ secrets.VPS_SSH_HOST }}
+
+      - name: Authenticate to Vault
+        if: inputs.tf_action != 'validate'
+        env:
+          VAULT_BOOTSTRAP_TOKEN: ${{ secrets.VAULT_BOOTSTRAP_TOKEN }}
+          VAULT_CI_ROLE_ID: ${{ secrets.VAULT_CI_ROLE_ID }}
+          VAULT_CI_SECRET_ID: ${{ secrets.VAULT_CI_SECRET_ID }}
+          VAULT_APPROLE_PATH: ${{ vars.VAULT_APPROLE_PATH }}
+        run: |
+          APPROLE_PATH="${VAULT_APPROLE_PATH:-approle}"
+          if [ -n "$VAULT_CI_ROLE_ID" ] && [ -n "$VAULT_CI_SECRET_ID" ]; then
+            AUTH_PAYLOAD=$(jq -nc --arg role_id "$VAULT_CI_ROLE_ID" --arg secret_id "$VAULT_CI_SECRET_ID" '{role_id:$role_id,secret_id:$secret_id}')
+            AUTH_RESPONSE=$(curl -fsS \
+              --header 'Content-Type: application/json' \
+              --data "$AUTH_PAYLOAD" \
+              "$VAULT_TUNNEL_ADDR/v1/auth/$APPROLE_PATH/login")
+            TF_VAULT_TOKEN=$(python -c "import json,sys; print(json.load(sys.stdin)['auth']['client_token'])" <<< "$AUTH_RESPONSE")
+          elif [ -n "$VAULT_BOOTSTRAP_TOKEN" ]; then
+            TF_VAULT_TOKEN="$VAULT_BOOTSTRAP_TOKEN"
+          else
+            echo "Set either VAULT_CI_ROLE_ID + VAULT_CI_SECRET_ID or VAULT_BOOTSTRAP_TOKEN." >&2
+            exit 1
+          fi
+
+          echo "TF_VAR_vault_addr=$VAULT_TUNNEL_ADDR" >> "$GITHUB_ENV"
+          echo "TF_VAR_vault_token=$TF_VAULT_TOKEN" >> "$GITHUB_ENV"
+
+      - name: Terraform plan
+        if: inputs.tf_action == 'plan'
+        run: terraform plan
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Terraform apply
+        if: inputs.tf_action == 'apply'
+        run: terraform apply -auto-approve
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Terraform destroy
+        if: inputs.tf_action == 'destroy'
+        run: terraform destroy -auto-approve
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Commit Terraform state to tf-state branch
+        if: inputs.tf_action == 'apply' || inputs.tf_action == 'destroy'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          ORIG_BRANCH=$(git symbolic-ref --short HEAD)
+          git fetch origin ${{ env.TF_STATE_BRANCH }} 2>/dev/null || true
+
+          if ! git rev-parse --verify origin/${{ env.TF_STATE_BRANCH }} &>/dev/null; then
+            git checkout --orphan ${{ env.TF_STATE_BRANCH }}
+            git rm -rf . --quiet
+          else
+            git checkout ${{ env.TF_STATE_BRANCH }} || git checkout -b ${{ env.TF_STATE_BRANCH }} origin/${{ env.TF_STATE_BRANCH }}
+          fi
+
+          mkdir -p vault-config
+          cp "$TF_DIR/terraform.tfstate" vault-config/terraform.tfstate
+          git add vault-config/terraform.tfstate
+          git diff --cached --quiet || git commit -m "chore: update vault-config terraform state [skip ci]"
+          git push origin ${{ env.TF_STATE_BRANCH }}
+          git checkout "$ORIG_BRANCH"

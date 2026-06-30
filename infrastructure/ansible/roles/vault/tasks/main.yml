@@ -1,0 +1,168 @@
+---
+- name: Validate Vault state inputs
+  ansible.builtin.assert:
+    that:
+      - vault_state in ['present', 'absent']
+    fail_msg: "Set vault_state to present or absent."
+
+- name: Install Vault host packages
+  ansible.builtin.apt:
+    name:
+      - unzip
+      - curl
+    state: present
+    update_cache: true
+  when: vault_state == 'present'
+
+- name: Create Vault group
+  ansible.builtin.group:
+    name: "{{ vault_group }}"
+    system: true
+  when: vault_state == 'present'
+
+- name: Create Vault user
+  ansible.builtin.user:
+    name: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    shell: /usr/sbin/nologin
+    create_home: false
+    system: true
+  when: vault_state == 'present'
+
+- name: Create Vault install directory
+  ansible.builtin.file:
+    path: "{{ vault_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: vault_state == 'present'
+
+- name: Create Vault config directory
+  ansible.builtin.file:
+    path: "{{ vault_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ vault_group }}"
+    mode: "0750"
+  when: vault_state == 'present'
+
+- name: Create Vault data directory
+  ansible.builtin.file:
+    path: "{{ vault_data_dir }}"
+    state: directory
+    owner: "{{ vault_user }}"
+    group: "{{ vault_group }}"
+    mode: "0750"
+  when: vault_state == 'present'
+
+- name: Download Vault archive
+  ansible.builtin.get_url:
+    url: "{{ vault_download_url }}"
+    dest: "{{ vault_install_dir }}/{{ vault_zip_name }}"
+    mode: "0644"
+  when: vault_state == 'present'
+
+- name: Extract Vault archive
+  ansible.builtin.unarchive:
+    src: "{{ vault_install_dir }}/{{ vault_zip_name }}"
+    dest: "{{ vault_install_dir }}"
+    remote_src: true
+    creates: "{{ vault_install_dir }}/vault"
+  when: vault_state == 'present'
+
+- name: Install Vault binary
+  ansible.builtin.copy:
+    src: "{{ vault_install_dir }}/vault"
+    dest: "{{ vault_bin_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: vault_state == 'present'
+
+- name: Write Vault configuration
+  ansible.builtin.template:
+    src: vault.hcl.j2
+    dest: "{{ vault_config_path }}"
+    owner: root
+    group: "{{ vault_group }}"
+    mode: "0640"
+  when: vault_state == 'present'
+
+- name: Write Vault systemd service
+  ansible.builtin.template:
+    src: vault.service.j2
+    dest: "{{ vault_service_unit_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: vault_state == 'present'
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: vault_state == 'present'
+
+- name: Enable and start Vault service
+  ansible.builtin.systemd:
+    name: "{{ vault_service_name }}"
+    enabled: true
+    state: started
+  when: vault_state == 'present'
+
+- name: Stop Vault service
+  ansible.builtin.systemd:
+    name: "{{ vault_service_name }}"
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: vault_state == 'absent'
+
+- name: Remove Vault systemd unit
+  ansible.builtin.file:
+    path: "{{ vault_service_unit_path }}"
+    state: absent
+  when: vault_state == 'absent'
+
+- name: Reload systemd after Vault removal
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: vault_state == 'absent'
+
+- name: Remove Vault binary
+  ansible.builtin.file:
+    path: "{{ vault_bin_path }}"
+    state: absent
+  when: vault_state == 'absent'
+
+- name: Remove Vault config directory
+  ansible.builtin.file:
+    path: "{{ vault_config_dir }}"
+    state: absent
+  when: vault_state == 'absent'
+
+- name: Remove Vault data directory
+  ansible.builtin.file:
+    path: "{{ vault_data_dir }}"
+    state: absent
+  when: vault_state == 'absent'
+
+- name: Remove Vault install directory
+  ansible.builtin.file:
+    path: "{{ vault_install_dir }}"
+    state: absent
+  when: vault_state == 'absent'
+
+- name: Remove Vault user
+  ansible.builtin.user:
+    name: "{{ vault_user }}"
+    state: absent
+    remove: false
+  when: vault_state == 'absent'
+
+- name: Remove Vault group
+  ansible.builtin.group:
+    name: "{{ vault_group }}"
+    state: absent
+  when: vault_state == 'absent'

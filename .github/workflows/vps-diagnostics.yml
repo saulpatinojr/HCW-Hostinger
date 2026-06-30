@@ -43,17 +43,28 @@ jobs:
             echo ""
 
             echo "====== GITHUB RUNNER ======"
-            RUNNER_ID=$(docker ps -q --filter "name=github-runner" 2>/dev/null | head -1)
-            if [ -n "$RUNNER_ID" ]; then
-              echo "Runner container is UP:"
-              docker ps --filter "name=github-runner" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+            RUNNER_UNIT=$(systemctl list-units --type=service --all --no-legend 'actions.runner*' 2>/dev/null | awk '{print $1}' | head -1)
+            if [ -n "$RUNNER_UNIT" ]; then
+              echo "Runner service is UP:"
+              systemctl status --no-pager "$RUNNER_UNIT" || true
               echo ""
               echo "Recent runner logs:"
-              docker logs --tail 20 "$RUNNER_ID" 2>&1
+              journalctl -u "$RUNNER_UNIT" --no-pager --lines 20 2>&1 || true
             else
-              echo "Runner container not found or not running"
-              echo "All containers:"
-              docker ps -a 2>/dev/null || true
+              echo "Runner service not found or not running"
+              echo "All runner-related services:"
+              systemctl list-units --type=service --all | grep actions.runner || true
+            fi
+            echo ""
+
+            echo "====== VAULT ======"
+            if systemctl list-unit-files | grep -q '^vault.service'; then
+              systemctl status --no-pager vault.service || true
+              echo ""
+              echo "Vault health endpoint:"
+              curl -s http://127.0.0.1:8200/v1/sys/health || true
+            else
+              echo "Vault service not found"
             fi
             echo ""
 
@@ -71,4 +82,4 @@ jobs:
             echo ""
 
             echo "====== NETWORK ======"
-            ss -tlnp | grep -E '80|443|22|9443' || true
+            ss -tlnp | grep -E '80|443|22|9443|8200' || true

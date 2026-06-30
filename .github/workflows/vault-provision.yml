@@ -1,0 +1,100 @@
+name: Vault Provision
+
+on:
+  workflow_dispatch:
+    inputs:
+      vault_action:
+        description: "Vault action"
+        required: true
+        default: apply
+        type: choice
+        options: [plan, apply, destroy]
+
+env:
+  TF_DIR: infrastructure/terraform
+  ANSIBLE_DIR: infrastructure/ansible
+
+jobs:
+  vault:
+    name: Vault ${{ inputs.vault_action }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init -backend=false
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Terraform validate
+        run: terraform validate
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_hostinger_api_key: dummy
+          TF_VAR_vm_id: "0"
+          TF_VAR_vps_ip: 127.0.0.1
+          TF_VAR_ssh_user: runner
+
+      - name: Install Ansible
+        run: pip install --quiet ansible
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+        working-directory: ${{ env.ANSIBLE_DIR }}
+
+      - name: Ansible syntax check
+        run: ansible-playbook vault.yml --syntax-check
+        working-directory: ${{ env.ANSIBLE_DIR }}
+
+      - name: Sanity check Vault role naming
+        run: |
+          ! grep -R -nE "github_runner|runner_registration_token|runner_removal_token|gh_runner" \
+            infrastructure/ansible/vault.yml \
+            infrastructure/ansible/roles/vault
+
+      - name: Write SSH private key
+        if: inputs.vault_action != 'plan'
+        run: |
+          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > "$RUNNER_TEMP/vps_key"
+          chmod 600 "$RUNNER_TEMP/vps_key"
+
+      - name: Generate Ansible inventory
+        if: inputs.vault_action != 'plan'
+        run: |
+          mkdir -p ${{ env.ANSIBLE_DIR }}/inventory
+          cat > ${{ env.ANSIBLE_DIR }}/inventory/hosts.yml << 'EOF'
+          all:
+            hosts:
+              vps:
+                ansible_host: ${{ secrets.VPS_SSH_HOST }}
+                ansible_user: ${{ secrets.VPS_SSH_USERNAME }}
+                ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+          EOF
+
+      - name: Write apply vars
+        if: inputs.vault_action == 'apply'
+        run: |
+          cat > "$RUNNER_TEMP/vault-vars.yml" <<EOF
+          vault_state: present
+          EOF
+
+      - name: Write destroy vars
+        if: inputs.vault_action == 'destroy'
+        run: |
+          cat > "$RUNNER_TEMP/vault-vars.yml" <<EOF
+          vault_state: absent
+          EOF
+
+      - name: Run Vault playbook
+        if: inputs.vault_action != 'plan'
+        run: |
+          ansible-playbook vault.yml \
+            --private-key "$RUNNER_TEMP/vps_key" \
+            -e "@$RUNNER_TEMP/vault-vars.yml"
+        working-directory: ${{ env.ANSIBLE_DIR }}

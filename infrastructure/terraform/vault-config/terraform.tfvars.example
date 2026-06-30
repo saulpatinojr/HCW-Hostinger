@@ -1,0 +1,18 @@
+vault_addr = "http://127.0.0.1:8200"
+
+# Export a temporary admin/bootstrap token into the environment rather than
+# committing it to a tfvars file when possible.
+# vault_token = "replace-me"
+
+vault_skip_tls_verify         = true
+vault_enable_kv_v2            = true
+vault_kv_v2_path              = "kv"
+vault_enable_approle          = true
+vault_approle_path            = "approle"
+vault_enable_bootstrap_policy = true
+vault_bootstrap_policy_name   = "automation-bootstrap"
+vault_enable_ci_approle       = true
+vault_ci_policy_name          = "terraform-vault-ci"
+vault_ci_role_name            = "terraform-ci"
+vault_ci_token_ttl            = "1h"
+vault_ci_token_max_ttl        = "4h"
