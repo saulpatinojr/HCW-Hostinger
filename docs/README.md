@@ -28,6 +28,7 @@ Vendor-targeted educational posts about replacing GitHub-hosted runners with a s
 | 8 | Docker | [Why Docker Compose is the right deployment unit](./blog/08-docker-compose-as-deployment-unit.md) |
 | 9 | Docker / Security | [What you trade away with the Docker socket and privileged mode](./blog/09-docker-socket-volumes-security.md) |
 | 10 | Docker / Developer Experience | [Manage your VPS Docker from your laptop in 2 minutes](./blog/10-remote-docker-desktop-ssh-context.md) |
+| 11 | Runner operations | [FinOps Dependabot runner](./finops-dependabot-runner.md) |
 
 ## Architecture Decision Records
 

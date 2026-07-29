@@ -1,0 +1,20 @@
+---
+# The runner release and checksum are pinned so a provisioning run cannot pull
+# an unreviewed executable from a moving tag.
+github_runner_native_version: "2.336.0"
+github_runner_native_arch: "linux-x64"
+github_runner_native_sha256: "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d"
+github_runner_native_user: "finops-runner"
+github_runner_native_group: "finops-runner"
+github_runner_native_dir: "/opt/finops-actions-runner"
+github_runner_native_name: "finops-dependabot"
+github_runner_native_repo: "saulpatinojr/Work-Cloud_FinOps_Assessment"
+github_runner_native_labels: "dependabot,finops"
+github_runner_native_workdir: "_work"
+github_runner_native_service_name: >-
+  actions.runner.saulpatinojr-Work-Cloud_FinOps_Assessment.{{ github_runner_native_name }}.service
+github_runner_native_service_path: "/etc/systemd/system/{{ github_runner_native_service_name }}"
+
+# Pass a short-lived repository registration token at run time. It is never
+# written to disk or emitted in Ansible output.
+github_runner_native_registration_token: ""

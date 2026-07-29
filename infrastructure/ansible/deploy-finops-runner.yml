@@ -1,0 +1,10 @@
+---
+# Targeted playbook: it intentionally omits the common, Docker, Portainer, and
+# Kubernetes roles so adding a runner cannot upgrade or otherwise reconfigure
+# the existing VPS services.
+- name: Deploy the FinOps Dependabot runner
+  hosts: vps
+  become: true
+  gather_facts: true
+  roles:
+    - github_runner_native

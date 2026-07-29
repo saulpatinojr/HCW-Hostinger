@@ -1,0 +1,6 @@
+---
+- name: Restart FinOps GitHub Actions runner
+  ansible.builtin.systemd:
+    name: "{{ github_runner_native_service_name }}"
+    state: restarted
+    daemon_reload: true

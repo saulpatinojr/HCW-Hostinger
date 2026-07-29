@@ -1,0 +1,100 @@
+---
+- name: Create the dedicated runner group
+  ansible.builtin.group:
+    name: "{{ github_runner_native_group }}"
+    state: present
+
+- name: Create the dedicated runner account
+  ansible.builtin.user:
+    name: "{{ github_runner_native_user }}"
+    group: "{{ github_runner_native_group }}"
+    groups: docker
+    append: true
+    create_home: true
+    shell: /bin/bash
+    system: true
+    state: present
+
+- name: Create the dedicated runner directory
+  ansible.builtin.file:
+    path: "{{ github_runner_native_dir }}"
+    state: directory
+    owner: "{{ github_runner_native_user }}"
+    group: "{{ github_runner_native_group }}"
+    mode: "0750"
+
+- name: Download the pinned GitHub Actions runner release
+  ansible.builtin.get_url:
+    url: "https://github.com/actions/runner/releases/download/v{{ github_runner_native_version }}/actions-runner-{{ github_runner_native_arch }}-{{ github_runner_native_version }}.tar.gz"
+    dest: "/tmp/actions-runner-{{ github_runner_native_arch }}-{{ github_runner_native_version }}.tar.gz"
+    checksum: "sha256:{{ github_runner_native_sha256 }}"
+    mode: "0644"
+
+- name: Extract the GitHub Actions runner if it is not already installed
+  ansible.builtin.unarchive:
+    src: "/tmp/actions-runner-{{ github_runner_native_arch }}-{{ github_runner_native_version }}.tar.gz"
+    dest: "{{ github_runner_native_dir }}"
+    remote_src: true
+    owner: "{{ github_runner_native_user }}"
+    group: "{{ github_runner_native_group }}"
+    creates: "{{ github_runner_native_dir }}/config.sh"
+
+- name: Check whether the runner has already been registered
+  ansible.builtin.stat:
+    path: "{{ github_runner_native_dir }}/.runner"
+  register: github_runner_native_runner_file
+
+- name: Assert that a registration token is supplied for an unconfigured runner
+  ansible.builtin.assert:
+    that:
+      - github_runner_native_registration_token | length > 0
+    fail_msg: >-
+      Supply github_runner_native_registration_token only when registering a
+      new runner. Mint it with the GitHub Actions runner registration-token API.
+  when: not github_runner_native_runner_file.stat.exists
+
+- name: Register the FinOps runner with GitHub
+  ansible.builtin.command:
+    argv:
+      - "{{ github_runner_native_dir }}/config.sh"
+      - --unattended
+      - --replace
+      - --url
+      - "https://github.com/{{ github_runner_native_repo }}"
+      - --token
+      - "{{ github_runner_native_registration_token }}"
+      - --name
+      - "{{ github_runner_native_name }}"
+      - --labels
+      - "{{ github_runner_native_labels }}"
+      - --work
+      - "{{ github_runner_native_workdir }}"
+  become: true
+  become_user: "{{ github_runner_native_user }}"
+  no_log: true
+  when: not github_runner_native_runner_file.stat.exists
+
+- name: Generate the runner service wrapper
+  ansible.builtin.copy:
+    src: "{{ github_runner_native_dir }}/bin/runsvc.sh"
+    dest: "{{ github_runner_native_dir }}/runsvc.sh"
+    remote_src: true
+    owner: "{{ github_runner_native_user }}"
+    group: "{{ github_runner_native_group }}"
+    mode: "0755"
+
+- name: Install the FinOps runner systemd unit
+  ansible.builtin.template:
+    src: github-runner.service.j2
+    dest: "{{ github_runner_native_service_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart FinOps GitHub Actions runner
+
+- name: Enable and start the FinOps runner service
+  ansible.builtin.systemd:
+    name: "{{ github_runner_native_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -1,0 +1,18 @@
+[Unit]
+Description=GitHub Actions Runner ({{ github_runner_native_repo }} {{ github_runner_native_name }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Sourced from the runner's supported svc.sh installer; it supplies clean
+# signal handling around the runner listener.
+ExecStart={{ github_runner_native_dir }}/runsvc.sh
+User={{ github_runner_native_user }}
+WorkingDirectory={{ github_runner_native_dir }}
+# Terminate the listener and all of its helper processes together on a restart.
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=5min
+
+[Install]
+WantedBy=multi-user.target
