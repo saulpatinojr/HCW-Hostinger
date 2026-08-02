@@ -1,10 +1,12 @@
 ---
+# Was: a second `docker_compose_v2 state: present` call, which re-applies the
+# stack rather than verifying it and cannot fail when the container is down.
+# The follow-on debug read `runner_status.services.runner.State.Status`, but
+# the module returns `containers` (a list) and never `services`, so it always
+# fell through to `default('unknown')` — and it was never notified anyway, so
+# it never ran. Verify the container directly, matching the portainer role.
 - name: Verify runner container
-  community.docker.docker_compose_v2:
-    project_src: /opt/github-runner
-    state: present
-  register: runner_status
-
-- name: Show runner status
-  ansible.builtin.debug:
-    msg: "Runner container state: {{ runner_status.services.runner.State.Status | default('unknown') }}"
+  community.docker.docker_container_info:
+    name: github-runner-runner-1
+  register: _runner_info
+  failed_when: not _runner_info.exists or _runner_info.container['State']['Status'] != 'running'

@@ -1,0 +1,126 @@
+name: CI
+
+# Nothing validated changes before merge — every workflow in this repo is
+# workflow_dispatch or push-to-main, so a syntax error in a role or a malformed
+# workflow only surfaced when someone ran a provisioning job against the VPS.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+          terraform_wrapper: false
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+        working-directory: infrastructure/terraform
+
+      # -backend=false: validation must not need the tf-state branch or any
+      # remote credentials.
+      - name: Validate root module
+        run: |
+          terraform init -backend=false
+          terraform validate
+        working-directory: infrastructure/terraform
+
+      - name: Validate vault-config module
+        run: |
+          terraform init -backend=false
+          terraform validate
+        working-directory: infrastructure/terraform/vault-config
+
+  ansible:
+    name: Ansible
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: pip install --quiet ansible ansible-lint
+
+      - name: Install collections
+        run: ansible-galaxy collection install -r requirements.yml
+        working-directory: infrastructure/ansible
+
+      # syntax-check needs an inventory to resolve the `vps` host, but never
+      # connects to it.
+      - name: Generate a placeholder inventory
+        run: |
+          mkdir -p infrastructure/ansible/inventory
+          cat > infrastructure/ansible/inventory/hosts.yml <<'EOF'
+          all:
+            hosts:
+              vps:
+                ansible_host: 127.0.0.1
+          EOF
+
+      - name: Syntax check playbooks
+        run: |
+          for pb in site.yml vault.yml deploy-finops-runner.yml; do
+            echo "── $pb"
+            ansible-playbook "$pb" --syntax-check
+          done
+        working-directory: infrastructure/ansible
+
+      # Advisory for now: the existing roles have pre-existing findings. Flip
+      # off `continue-on-error` once TODO.md's ansible-lint item is done.
+      - name: Ansible lint
+        run: ansible-lint --offline || true
+        working-directory: infrastructure/ansible
+        continue-on-error: true
+
+  workflows:
+    name: Workflow YAML
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse every workflow and compose file
+        run: |
+          python3 - <<'PY'
+          import glob, sys, yaml
+          bad = []
+          for f in glob.glob('.github/workflows/*.yml') + ['docker-compose.yml', 'action.yaml']:
+              try:
+                  yaml.safe_load(open(f))
+                  print(f'OK   {f}')
+              except Exception as e:
+                  bad.append(f)
+                  print(f'FAIL {f}: {e}')
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Render the rustdesk compose template
+        run: |
+          pip install --quiet jinja2 pyyaml
+          python3 - <<'PY'
+          import json, yaml
+          from jinja2 import Environment, FileSystemLoader
+          root = 'infrastructure/ansible/roles/rustdesk'
+          env = Environment(loader=FileSystemLoader(f'{root}/templates'))
+          env.filters['to_json'] = json.dumps
+          defaults = yaml.safe_load(open(f'{root}/defaults/main.yml'))
+          for extra in ({}, {'rustdesk_relay_host': 'relay.example.com'},
+                        {'rustdesk_require_key': False},
+                        {'rustdesk_websocket_enabled': True}):
+              v = {**defaults, **extra}
+              yaml.safe_load(env.get_template('docker-compose.yml.j2').render(**v))
+              print('OK  ', extra or 'defaults')
+          PY

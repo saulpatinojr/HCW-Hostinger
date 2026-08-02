@@ -7,12 +7,17 @@
     group: root
     mode: "0755"
 
+# 0600, not 0644: this file embeds the GitHub App private key in plaintext.
+# At 0644 every local account on the VPS could read it and mint installation
+# tokens for the repo.
 - name: Write runner docker-compose.yml
   ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: /opt/github-runner/docker-compose.yml
-    mode: "0644"
-  register: _compose_changed
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
 
 - name: Pull latest runner image
   community.docker.docker_compose_v2_pull:

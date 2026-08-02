@@ -90,6 +90,12 @@ jobs:
             exit 1
           fi
 
+          # The AppRole login response is a freshly minted token, so it is not
+          # one of the repository secrets GitHub masks automatically. Register
+          # it before it can reach a log line (a terraform error, `set -x`, a
+          # 403 body) as cleartext.
+          echo "::add-mask::$TF_VAULT_TOKEN"
+
           echo "TF_VAR_vault_addr=$VAULT_TUNNEL_ADDR" >> "$GITHUB_ENV"
           echo "TF_VAR_vault_token=$TF_VAULT_TOKEN" >> "$GITHUB_ENV"
 
