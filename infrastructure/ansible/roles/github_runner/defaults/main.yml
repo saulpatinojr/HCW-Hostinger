@@ -1,4 +1,32 @@
 ---
-github_runner_dir: /opt/github-runner
-github_runner_name: "{{ ansible_facts['hostname'] }}"
-github_runner_labels: "self-hosted,linux"
+# One compose project per runner, under a shared parent directory. Each runner
+# uses project name "runner-<name>", so its container is predictably
+# "runner-<name>-runner-1" and can be verified by name.
+github_runner_base_dir: /opt/runners
+
+# Pinned, not :latest — an unattended `docker compose pull` should never swap
+# the runner out from under a running job.
+github_runner_image: "myoung34/github-runner:2.336.0"
+
+# Every runner this VPS hosts. Adding a repo to the lab means adding an entry
+# here and re-running with --tags runner; nothing is configured by hand on the
+# box. See docs/wiki/Deploying-to-the-VPS.md.
+#
+#   name:   short slug — used for the compose project and the runner name
+#   repo:   owner/repo the runner registers against
+#   labels: comma-separated; GitHub always adds `self-hosted` itself
+#
+# The GitHub App (github_app_id / github_app_private_key) must be installed on
+# every repo listed here, or that runner fails to register and restart-loops.
+github_runners:
+  - name: personal-site
+    repo: saulpatinojr/personal-site
+    labels: "linux,personal-site"
+
+# Containers from the pre-Ansible era, removed only after their replacement is
+# up and running. The VPS was running `personal-site_hcw-runner-1` from a
+# hand-made compose project; the role now owns it as
+# `runner-personal-site-runner-1`. Empty this list once the migration is done.
+github_runner_legacy_containers:
+  - personal-site_hcw-runner-1
+github_runner_remove_legacy: true

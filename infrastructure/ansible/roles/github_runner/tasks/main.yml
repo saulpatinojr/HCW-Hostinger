@@ -1,31 +1,85 @@
 ---
-- name: Create runner directory
+- name: Validate runner definitions
+  ansible.builtin.assert:
+    that:
+      - item.name is defined and item.name | length > 0
+      - item.repo is defined and '/' in item.repo
+    fail_msg: >-
+      Each entry in github_runners needs a `name` and an `owner/repo` `repo`.
+      Offending entry: {{ item }}
+    quiet: true
+  loop: "{{ github_runners }}"
+  loop_control:
+    label: "{{ item.name | default('<unnamed>') }}"
+
+- name: Create the runners parent directory
   ansible.builtin.file:
-    path: /opt/github-runner
+    path: "{{ github_runner_base_dir }}"
     state: directory
     owner: root
     group: root
     mode: "0755"
 
-# 0600, not 0644: this file embeds the GitHub App private key in plaintext.
-# At 0644 every local account on the VPS could read it and mint installation
-# tokens for the repo.
-- name: Write runner docker-compose.yml
+- name: Create a directory per runner
+  ansible.builtin.file:
+    path: "{{ github_runner_base_dir }}/{{ item.name }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop: "{{ github_runners }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# 0600 and no_log: this file embeds the GitHub App private key in plaintext.
+# At 0644 any local account could read it and mint installation tokens.
+- name: Write each runner's docker-compose.yml
   ansible.builtin.template:
     src: docker-compose.yml.j2
-    dest: /opt/github-runner/docker-compose.yml
+    dest: "{{ github_runner_base_dir }}/{{ item.name }}/docker-compose.yml"
     owner: root
     group: root
     mode: "0600"
+  loop: "{{ github_runners }}"
+  loop_control:
+    label: "{{ item.name }}"
   no_log: true
 
-- name: Pull latest runner image
+- name: Pull the runner image
   community.docker.docker_compose_v2_pull:
-    project_src: /opt/github-runner
+    project_src: "{{ github_runner_base_dir }}/{{ item.name }}"
+    project_name: "runner-{{ item.name }}"
+  loop: "{{ github_runners }}"
+  loop_control:
+    label: "{{ item.name }}"
 
-- name: Start (or recreate if config changed) runner container
+- name: Start (or recreate if config changed) each runner
   community.docker.docker_compose_v2:
-    project_src: /opt/github-runner
+    project_src: "{{ github_runner_base_dir }}/{{ item.name }}"
+    project_name: "runner-{{ item.name }}"
     state: present
     recreate: auto
-  notify: Verify runner container
+  loop: "{{ github_runners }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Verify each runner container is running
+  community.docker.docker_container_info:
+    name: "runner-{{ item.name }}-runner-1"
+  register: _runner_info
+  failed_when: >-
+    not _runner_info.exists
+    or _runner_info.container['State']['Status'] != 'running'
+  loop: "{{ github_runners }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Only after the replacements are confirmed running — losing the old container
+# before the new one registers would leave the repo with no runner at all.
+- name: Remove superseded pre-Ansible runner containers
+  community.docker.docker_container:
+    name: "{{ item }}"
+    state: absent
+    force_kill: false
+  loop: "{{ github_runner_legacy_containers }}"
+  when: github_runner_remove_legacy | bool

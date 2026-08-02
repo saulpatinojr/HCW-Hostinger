@@ -59,3 +59,4 @@ Vendor-targeted educational posts about replacing GitHub-hosted runners with a s
 | [0013](./adr/0013-docker-socket-security-model.md) | Docker socket mounting — accepted risk with documented upgrade path |
 | [0014](./adr/0014-named-volumes-and-restart-policy.md) | Named volumes for persistent data; `restart: unless-stopped` policy |
 | [0015](./adr/0015-rustdesk-relay-host-networking-and-key-persistence.md) | RustDesk relay on host networking, with an enforced key and a persisted keypair |
+| [0016](./adr/0016-reconcile-roles-with-actual-vps-state.md) | Reconcile the roles with the VPS's actual state (Portainer EE, list-driven runners, k3s) |

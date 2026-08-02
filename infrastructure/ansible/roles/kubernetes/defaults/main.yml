@@ -1,4 +1,22 @@
 ---
+# ── Backend lab: k3s ─────────────────────────────────────────────────────────
+# k3s is what actually runs the backend lab on this VPS, with live workloads.
+# This role adopts it: it installs k3s if absent, and otherwise only asserts
+# that the service is enabled and running. It never upgrades and never
+# uninstalls — bumping k3s_version does nothing to an existing install, by
+# design. Rolling the API server underneath running pods is not something a
+# routine provisioning run should do. Upgrade deliberately. See ADR-0016.
+k3s_manage: true
+k3s_version: "v1.36.2+k3s1"
+k3s_service_name: k3s
+# Applied on a *fresh* install only.
+k3s_install_args: "--write-kubeconfig-mode 644"
+
+# ── Throwaway clusters: kind / k3d ───────────────────────────────────────────
+# A separate concern from the backend lab. These stand up and tear down
+# disposable clusters inside CI jobs; they are tools, not the lab.
+k8s_tools_manage: true
 kind_version: "0.24.0"
-kubectl_version: "stable"   # resolves to latest stable via dl.k8s.io
-k3d_version: "5.7.4"
+k3d_version: "5.9.0"
+helm_version: "3.21.3"
+kubectl_version: "stable"   # resolves via dl.k8s.io/release/stable.txt

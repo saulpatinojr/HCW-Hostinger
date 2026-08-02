@@ -1,12 +1,4 @@
 ---
-# Was: a second `docker_compose_v2 state: present` call, which re-applies the
-# stack rather than verifying it and cannot fail when the container is down.
-# The follow-on debug read `runner_status.services.runner.State.Status`, but
-# the module returns `containers` (a list) and never `services`, so it always
-# fell through to `default('unknown')` — and it was never notified anyway, so
-# it never ran. Verify the container directly, matching the portainer role.
-- name: Verify runner container
-  community.docker.docker_container_info:
-    name: github-runner-runner-1
-  register: _runner_info
-  failed_when: not _runner_info.exists or _runner_info.container['State']['Status'] != 'running'
+# No handlers. Verification runs inline in tasks/main.yml because the role now
+# manages a list of runners and each one must be checked by its own container
+# name — a notified handler cannot see the loop variable that names it.

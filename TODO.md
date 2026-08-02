@@ -1,45 +1,54 @@
 # TODO
 
-Tracked improvements and next steps for the HCW-Hostinger self-hosted runner stack.
+Tracked improvements and next steps for the HCW-Hostinger VPS stack.
+
+## Blocking
+
+- [ ] **Initialise Vault** — as of 2026-08-02 the service reports `{"initialized": false, "sealed": true}` and has been up three weeks doing nothing. `Vault Config` cannot work at all until step 4 of [VAULT-WORKFLOW-RUNBOOK.md](./VAULT-WORKFLOW-RUNBOOK.md) (`vault operator init`) is done and the unseal keys are in safe custody. Deliberately manual — but it should not be silently unfinished.
+- [ ] **Consolidate to one SSH key** — `authorized_keys` carried three keys, one of them appended without a trailing newline and glued onto the previous entry's comment. `roles/common` now manages keys declaratively; populate `ssh_authorized_keys`, verify login, then set `ssh_authorized_keys_exclusive: true` to prune the rest. Generate with `scripts/New-VpsSshKey.ps1 -Purpose ci`.
 
 ## Infrastructure
 
-- [ ] **Fix VPS SSH authentication** — the `VPS Diagnostics` workflow fails at the SSH handshake (`unable to authenticate, attempted methods [none publickey]`). Last green run was 2026-06-30. `provision.yml` uses the same `VPS_SSH_KEY` secret, so Ansible provisioning is blocked until the key (or the VPS `authorized_keys` entry) is restored.
-- [ ] **Migrate Terraform state to Terraform Cloud** — replace orphan `tf-state` git branch with HCP Terraform free-tier remote backend. Enables real state locking, audit log, and removes the "never commit state" violation. See ADR-0011 and [blog post](./docs/blog/07-terraform-cloud-state-backend.md).
-- [ ] **Pin container image tags** — replace `:latest` with specific version tags in all compose files (`myoung34/github-runner`, `portainer/portainer-ce`, `nginx`). Prevents surprise breaking changes on next `docker compose pull`.
-- [ ] **Add TLS / HTTPS to the app** — provision a Let's Encrypt certificate via Certbot or Traefik. The VPS already has port 443 open in UFW; just needs an nginx config update and a cert renewal cron.
+- [ ] **Migrate Terraform state to Terraform Cloud** — replace the orphan `tf-state` git branch with an HCP Terraform free-tier remote backend. Real state locking, an audit log, and no committed state. See ADR-0011 and [blog post](./docs/blog/07-terraform-cloud-state-backend.md).
 - [ ] **Replace nginx placeholder** with the real application.
-
+- [ ] **Add TLS / HTTPS to the app** — Let's Encrypt via Certbot or Traefik. Port 443 is already open in UFW; needs an nginx config and a renewal cron.
 - [ ] **Drop the unused `hostinger` Terraform provider** — `main.tf` only manages a `local_file`. The `required_providers` entry and `provider "hostinger"` block force a provider download and an API token on every run for nothing.
 - [ ] **Add a workflow for `deploy-finops-runner.yml`** — the playbook exists but nothing invokes it, so the FinOps runner can only be rebuilt from an Ansible control host by hand.
+- [ ] **Plan a k3s upgrade path** — `roles/kubernetes` adopts k3s but never upgrades it, so a stale cluster will not be noticed by a provisioning run (ADR-0016). Needs a deliberate, separately-triggered upgrade procedure.
+- [ ] **Reap stale dependabot containers** — two `dependabot-job-*` containers were up 3 days. Nothing cleans them up.
 
 ## Security
 
-- [ ] **Docker socket proxy** — replace the direct `/var/run/docker.sock` bind mount in the runner and Portainer containers with a read-only socket proxy (e.g., `Tecnativa/docker-socket-proxy`). Limits what each container can do with the socket. See ADR-0013.
-- [ ] **Switch runner to rootless Docker** — eliminates the need for `privileged: true` on the runner container for most workloads.
-- [ ] **Pin SSH known hosts** — add a `known_hosts` step to the Ansible playbook / diagnostics workflow rather than relying on `StrictHostKeyChecking=no`.
-- [ ] **Audit GitHub App permissions** — review the app's repository permissions and reduce to the minimum required (currently: actions:read, metadata:read).
-- [ ] **Pin the k3d and helm installers** — `roles/kubernetes` pipes `install.sh` and `get-helm-3` straight from each project's `main` branch into `bash`. Both are moving targets: a compromised or simply changed upstream script runs as root on the next provisioning run. Pin to a release tag and verify a checksum, the way `github_runner_native` pins the runner tarball.
+- [ ] **Docker socket proxy** — replace the direct `/var/run/docker.sock` bind mount in the runner and Portainer containers with a read-only socket proxy (e.g. `Tecnativa/docker-socket-proxy`). See ADR-0013.
+- [ ] **Switch runners to rootless Docker** — removes the need for `privileged: true` for most workloads.
+- [ ] **Pin SSH known hosts** — add a `known_hosts` step to the playbook and workflows instead of relying on `StrictHostKeyChecking=no`.
+- [ ] **Audit GitHub App permissions** — reduce to the minimum required (currently actions:read, metadata:read). Note the App must be installed on every repo listed in `github_runners`.
 - [ ] **Checksum the runner tarball in `scripts/setup-runner.sh`** — it downloads `actions-runner-linux-x64` with no integrity check, unlike `roles/github_runner_native`, which verifies a pinned SHA-256.
-- [ ] **Reconsider `vault_disable_mlock: true`** — Vault's memory can be swapped to disk, so unsealed secrets can land on the VPS's swap device. Either grant `CAP_IPC_LOCK` and turn mlock back on, or disable swap on the host.
-- [ ] **Guard `Vault Provision` `destroy`** — the `destroy` option deletes `/var/lib/vault`, which is the entire Vault datastore, from a dropdown with no confirmation step and no backup. Add a typed-confirmation input or take a snapshot first.
+- [ ] **Guard `Vault Provision` `destroy`** — it deletes `/var/lib/vault`, the entire Vault datastore, from a dropdown with no confirmation and no backup. Add a typed-confirmation input or snapshot first.
+- [ ] **Revisit `vault_disable_mlock: true`** — low priority: the host currently has **no swap** (`Swap: 0B`), so there is nowhere for unsealed secrets to page out to. Becomes a real concern the moment swap is enabled. Either grant `CAP_IPC_LOCK` and re-enable mlock, or add a check that fails if swap appears.
 
 ## Observability
 
-- [ ] **Schedule the diagnostics workflow** — add a daily `schedule:` trigger to `vps-diagnostics.yml` so a health snapshot appears in Actions history without manual triggering.
-- [ ] **Wire Portainer webhook notifications** — configure Portainer CE to send a Slack/email alert when a container enters `unhealthy` state.
-- [ ] **Add container health checks** — add `HEALTHCHECK` directives to the runner and app compose services. Required before Portainer webhooks can trigger on `unhealthy`.
+- [ ] **Schedule the diagnostics workflow** — a daily `schedule:` trigger on `vps-diagnostics.yml`. This is what would have caught the five-week SSH outage and all the drift in ADR-0016; nothing compared intent to reality.
+- [ ] **Fail diagnostics loudly on a sealed or uninitialised Vault** — it currently prints the health JSON and moves on.
+- [ ] **Wire Portainer webhook notifications** — alert when a container enters `unhealthy`.
+- [ ] **Add container health checks** — `HEALTHCHECK` directives on the runner and app services. Required before Portainer webhooks can fire on `unhealthy`.
 
 ## Resilience
 
-- [ ] **Decide what happens to Vault on reboot** — Vault has no auto-unseal, and the `common` role reboots the VPS whenever a dist-upgrade brings a new kernel (ADR-0007). A routine provisioning run can therefore leave Vault sealed with no signal until something tries to read a secret. Either add auto-unseal, or make `VPS Diagnostics` fail loudly on a sealed Vault, or gate the reboot.
-
-- [ ] **Set up automated backups** — back up named Docker volumes (`portainer_data`, `runner_work`, `rustdesk_data`) to Hostinger object storage or an S3-compatible bucket on a schedule. `rustdesk_data` is the highest priority of the three: it holds the hbbs `id_ed25519` keypair, and losing it forces every RustDesk client to be re-keyed by hand. See ADR-0015.
-- [ ] **Add staging environment** — duplicate the runner + app stack under a `staging` label. The `multi-env-deploy.yml` workflow already branches on `github.ref`; just needs a second compose profile.
+- [ ] **Decide what happens to Vault on reboot** — no auto-unseal, and `common` reboots the VPS whenever a dist-upgrade brings a new kernel (ADR-0007). Either add auto-unseal, fail diagnostics on a sealed Vault, or gate the reboot.
+- [ ] **Set up automated backups** — back up named Docker volumes (`portainer_data`, `runner-*-work`, `rustdesk_data`) to object storage on a schedule. `rustdesk_data` is the highest priority: it holds the hbbs `id_ed25519` keypair, and losing it re-keys every client by hand (ADR-0015). `portainer_data` holds the Portainer EE licence state.
+- [ ] **Add staging environment** — duplicate the runner + app stack under a `staging` label. `multi-env-deploy.yml` already branches on `github.ref`; needs a second compose profile.
 
 ## Developer Experience
 
-- [ ] **Remote Docker Desktop context** — document and automate the one-time `docker context create vps` setup for team members. See [blog post](./docs/blog/10-remote-docker-desktop-ssh-context.md).
-- [ ] **Portainer Agent for multi-VPS** — when a second VPS is added, deploy Portainer Agent on it and connect to the existing Portainer CE dashboard.
-- [ ] **Ansible lint in CI** — add `ansible-lint` as a check on pull requests to enforce the idempotency patterns from ADR-0008.
-- [ ] **Terraform fmt / validate in CI** — add `terraform fmt -check` and `terraform validate` as PR checks.
+- [ ] **Remote Docker Desktop context** — document and automate the one-time `docker context create vps`. See [blog post](./docs/blog/10-remote-docker-desktop-ssh-context.md).
+- [ ] **Portainer Agent for multi-VPS** — when a second VPS appears, deploy the Agent and connect it to the existing Portainer dashboard.
+- [ ] **Make `ansible-lint` blocking in CI** — it runs advisory-only in `ci.yml` today because the existing roles have pre-existing findings. Fix those, then drop `continue-on-error`.
+
+## Done
+
+- [x] **Fix VPS SSH authentication** — restored 2026-08-02. Root cause was a stale `VPS_SSH_KEY` secret whose key was not in `authorized_keys`.
+- [x] **Pin container image tags** — runner, Portainer, RustDesk, kind/k3d/helm/kubectl are all pinned. The nginx placeholder is still `:alpine`, but it is a placeholder.
+- [x] **Pin the k3d and helm installers** — both now install from pinned release artefacts instead of `curl | bash` off each project's `main` branch (ADR-0016).
+- [x] **Terraform fmt / validate in CI** — added in `ci.yml`.

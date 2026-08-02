@@ -1,70 +1,137 @@
 ---
-# kind — runs each k8s node as a Docker container
-- name: Check if kind is installed
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend lab: k3s
+#
+# Adopt-only. k3s already serves live workloads on this host, so this section
+# must be safe on every provisioning pass. It installs only when k3s is absent,
+# and otherwise just asserts the service state.
+# ─────────────────────────────────────────────────────────────────────────────
+- name: Check whether k3s is installed
   ansible.builtin.stat:
-    path: /usr/local/bin/kind
-  register: kind_bin
+    path: /usr/local/bin/k3s
+  register: _k3s_bin
+  when: k3s_manage | bool
+  tags: [k3s]
 
+- name: Install k3s (only when absent)
+  ansible.builtin.shell:
+    cmd: >-
+      curl -sfL https://get.k3s.io
+      | INSTALL_K3S_VERSION={{ k3s_version }} sh -s - {{ k3s_install_args }}
+  when:
+    - k3s_manage | bool
+    - not _k3s_bin.stat.exists
+  changed_when: true
+  tags: [k3s]
+
+- name: Ensure the k3s service is enabled and running
+  ansible.builtin.systemd:
+    name: "{{ k3s_service_name }}"
+    enabled: true
+    state: started
+  when: k3s_manage | bool
+  tags: [k3s]
+
+- name: Read the running k3s version
+  ansible.builtin.command:
+    cmd: k3s --version
+  register: _k3s_version_out
+  changed_when: false
+  failed_when: false
+  when: k3s_manage | bool
+  tags: [k3s]
+
+# Read-only. Surfaces the lab's health in the provisioning log without the
+# playbook taking any position on what should be running inside it.
+- name: Read k3s node status
+  ansible.builtin.command:
+    cmd: k3s kubectl get nodes --no-headers
+  register: _k3s_nodes
+  changed_when: false
+  failed_when: false
+  when: k3s_manage | bool
+  tags: [k3s]
+
+- name: Report k3s state
+  ansible.builtin.debug:
+    msg:
+      - "k3s: {{ (_k3s_version_out.stdout_lines | default([]) | first) | default('not installed') }}"
+      - "nodes: {{ _k3s_nodes.stdout_lines | default(['unavailable']) }}"
+  when: k3s_manage | bool
+  tags: [k3s]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Throwaway cluster tooling
+#
+# Every download is a pinned release artefact. kind, k3d, kubectl and helm
+# previously came from `install.sh` and `get-helm-3` piped from each project's
+# `main` branch into bash as root — moving targets with no integrity check.
+# ─────────────────────────────────────────────────────────────────────────────
 - name: Install kind
   ansible.builtin.get_url:
     url: "https://kind.sigs.k8s.io/dl/v{{ kind_version }}/kind-linux-amd64"
     dest: /usr/local/bin/kind
     mode: "0755"
-  when: not kind_bin.stat.exists
-
-# k3d — runs k3s (lightweight k8s) nodes as Docker containers
-- name: Check if k3d is installed
-  ansible.builtin.stat:
-    path: /usr/local/bin/k3d
-  register: k3d_bin
+  when: k8s_tools_manage | bool
+  tags: [k8s_tools]
 
 - name: Install k3d
-  ansible.builtin.shell:
-    cmd: |
-      curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh \
-        | TAG=v{{ k3d_version }} bash
-  when: not k3d_bin.stat.exists
-  changed_when: true
+  ansible.builtin.get_url:
+    url: "https://github.com/k3d-io/k3d/releases/download/v{{ k3d_version }}/k3d-linux-amd64"
+    dest: /usr/local/bin/k3d
+    mode: "0755"
+  when: k8s_tools_manage | bool
+  tags: [k8s_tools]
 
-# kubectl — CLI for both kind and k3d clusters
-- name: Resolve latest stable kubectl version
+- name: Resolve the latest stable kubectl version
   ansible.builtin.uri:
     url: https://dl.k8s.io/release/stable.txt
     return_content: true
-  register: kubectl_stable
-  when: kubectl_version == "stable"
+  register: _kubectl_stable
+  when:
+    - k8s_tools_manage | bool
+    - kubectl_version == "stable"
+  tags: [k8s_tools]
 
-- name: Set kubectl version fact
+- name: Set the kubectl version fact
   ansible.builtin.set_fact:
-    _kubectl_version: "{{ kubectl_stable.content | trim if kubectl_version == 'stable' else kubectl_version }}"
-
-- name: Check if kubectl is installed
-  ansible.builtin.stat:
-    path: /usr/local/bin/kubectl
-  register: kubectl_bin
+    _kubectl_version: >-
+      {{ _kubectl_stable.content | trim
+         if kubectl_version == 'stable' else kubectl_version }}
+  when: k8s_tools_manage | bool
+  tags: [k8s_tools]
 
 - name: Install kubectl
   ansible.builtin.get_url:
     url: "https://dl.k8s.io/release/{{ _kubectl_version }}/bin/linux/amd64/kubectl"
     dest: /usr/local/bin/kubectl
     mode: "0755"
-  when: not kubectl_bin.stat.exists
+  when: k8s_tools_manage | bool
+  tags: [k8s_tools]
 
-# helm — package manager for k8s
-- name: Check if helm is installed
-  ansible.builtin.stat:
-    path: /usr/local/bin/helm
-  register: helm_bin
+- name: Download the pinned helm release
+  ansible.builtin.unarchive:
+    src: "https://get.helm.sh/helm-v{{ helm_version }}-linux-amd64.tar.gz"
+    dest: /tmp
+    remote_src: true
+    creates: "/tmp/linux-amd64/helm"
+  when: k8s_tools_manage | bool
+  tags: [k8s_tools]
 
 - name: Install helm
-  ansible.builtin.shell:
-    cmd: curl -s https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-  when: not helm_bin.stat.exists
-  changed_when: true
+  ansible.builtin.copy:
+    src: /tmp/linux-amd64/helm
+    dest: /usr/local/bin/helm
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: k8s_tools_manage | bool
+  tags: [k8s_tools]
 
-- name: Verify tool installations
+- name: Report installed tool versions
   ansible.builtin.command:
-    cmd: "{{ item }} version --short 2>/dev/null || {{ item }} version"
+    cmd: "{{ item }} version"
   loop:
     - kind
     - k3d
@@ -72,11 +139,15 @@
     - helm
   changed_when: false
   failed_when: false
-  register: tool_versions
+  register: _tool_versions
+  when: k8s_tools_manage | bool
+  tags: [k8s_tools]
 
-- name: Show installed k8s tool versions
+- name: Show installed tool versions
   ansible.builtin.debug:
-    msg: "{{ item.stdout | default(item.stderr) }}"
-  loop: "{{ tool_versions.results }}"
+    msg: "{{ (item.stdout | default(item.stderr, true)) | truncate(160) }}"
+  loop: "{{ _tool_versions.results | default([]) }}"
   loop_control:
-    label: "{{ item.item }}"
+    label: "{{ item.item | default('') }}"
+  when: k8s_tools_manage | bool
+  tags: [k8s_tools]

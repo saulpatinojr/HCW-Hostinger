@@ -3,3 +3,6 @@ collections:
     version: ">=8.0.0"
   - name: community.docker
     version: ">=3.0.0"
+  # authorized_key — declarative SSH key management in roles/common
+  - name: ansible.posix
+    version: ">=1.5.0"

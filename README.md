@@ -12,18 +12,29 @@ without hand-editing the server.**
 
 | Component | Managed by | Exposure | Tag |
 |---|---|---|---|
-| Base OS, UFW, SSH hardening, fail2ban | `roles/common` | 22/tcp | `common` |
+| Base OS, UFW, SSH keys, hardening, fail2ban | `roles/common` | 22/tcp | `common` |
 | Docker Engine + Compose v2 | `roles/docker` | — | `docker` |
-| Portainer CE | `roles/portainer` | `127.0.0.1:9443` (SSH tunnel) | `portainer` |
-| GitHub Actions runner (container) | `roles/github_runner` | — | `runner` |
-| kind / k3d / kubectl / helm | `roles/kubernetes` | — | `kubernetes` |
+| Portainer **EE** 2.39.4 | `roles/portainer` | `127.0.0.1:9443` (SSH tunnel) | `portainer` |
+| GitHub Actions runners (one per repo) | `roles/github_runner` | — | `runner` |
+| **k3s** — the backend lab | `roles/kubernetes` | cluster-internal | `k3s` |
+| kind / k3d / kubectl / helm | `roles/kubernetes` | — | `k8s_tools` |
 | RustDesk relay (hbbs + hbbr) | `roles/rustdesk` | 21115-21117/tcp, 21116/udp | `rustdesk` |
 | HashiCorp Vault | `roles/vault` | `127.0.0.1:8200` (SSH tunnel) | *(separate playbook)* |
 | FinOps Dependabot runner (native) | `roles/github_runner_native` | — | *(separate playbook)* |
 | Application stack | root `docker-compose.yml` | 80/tcp | *(deploy workflow)* |
 
-The Kubernetes tooling is for local training clusters on this box. The backend
-lab for the website is a **separate host** and is not managed here.
+**k3s runs the backend lab on this box**, with live workloads. The role adopts
+it: it installs k3s only when absent and otherwise just asserts the service is
+up. It never upgrades or removes it — see ADR-0016. kind and k3d are a separate
+concern, for disposable clusters inside CI jobs.
+
+### Adding a runner for another repo
+
+Runners are a list, so every one gets identical configuration. Add an entry to
+`github_runners` in `roles/github_runner/defaults/main.yml`, make sure the
+GitHub App is installed on that repo, and run `Provision VPS` with
+`ansible_tags: runner`. Full walkthrough in
+[Deploying to the VPS](./docs/wiki/Deploying-to-the-VPS.md).
 
 ## Layout
 
@@ -109,9 +120,21 @@ the `gh` snippet at the bottom of that file to push them.
 Both SSH and App keys are base64 because the workflows `base64 -d` them:
 
 ```bash
-base64 -w0 < ~/.ssh/id_ed25519          # → VPS_SSH_KEY
+base64 -w0 < ~/.ssh/hcw-vps_ci_ed25519  # → VPS_SSH_KEY
 base64 -w0 < github-app.private-key.pem # → GH_APP_PRIVATE_KEY
 ```
+
+On Windows, [`scripts/New-VpsSshKey.ps1`](./scripts/New-VpsSshKey.ps1) creates a
+key under the `<host>_<purpose>_ed25519` convention, verifies it has no
+passphrase, fixes the file ACL, and can push the secret for you:
+
+```powershell
+.\scripts\New-VpsSshKey.ps1 -Purpose ci -SetGitHubSecret -Repo saulpatinojr/HCW-Hostinger
+```
+
+Authorised keys are managed declaratively — add the public key to
+`ssh_authorized_keys` in `roles/common/defaults/main.yml` so it survives
+re-provisioning instead of being appended to the box by hand.
 
 ## First-time bring-up
 
@@ -124,9 +147,11 @@ base64 -w0 < github-app.private-key.pem # → GH_APP_PRIVATE_KEY
 
 ## Things to know before you touch this
 
-- **Vault seals on reboot.** There is no auto-unseal. Since `common` can reboot
-  the box, a full provisioning run can leave Vault sealed and needing a manual
-  `vault operator unseal`.
+- **Vault has never been initialised.** As of 2026-08-02 the service reports
+  `{"initialized": false, "sealed": true}` — it has been up for three weeks
+  doing nothing. `Vault Config` cannot work until someone completes step 4 of
+  the [runbook](./VAULT-WORKFLOW-RUNBOOK.md) (`vault operator init`). There is
+  also no auto-unseal, so a reboot re-seals it.
 - **The runner is privileged and mounts the Docker socket** (ADR-0013). A job on
   this runner is effectively root on the host.
 - **Terraform state lives on the orphan `tf-state` branch** (ADR-0005), not in a

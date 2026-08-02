@@ -1,50 +1,106 @@
 # Deploying to the VPS
 
-How to get a repo deploying onto the Hostinger VPS managed by
+How to get your repo building and deploying on the Hostinger VPS managed by
 [HCW-Hostinger](https://github.com/saulpatinojr/HCW-Hostinger).
 
-Read [Pick your path](#pick-your-path) first — choosing wrong costs you an
-afternoon. If you are deploying containers with bind mounts, the
-[Docker socket gotcha](#the-docker-socket-gotcha) is the section that will save
-you the most time.
+The one rule: **the VPS is configured from Ansible, never by hand.** Anything
+you `apt install` or `docker run` over SSH is undone by the next provisioning
+run. If your repo needs something on that box, it goes in the repo first.
 
 ---
 
-## Pick your path
+## What's already on the box
 
-| | **A — Hostinger API** | **B — Self-hosted runner** |
+| Component | Managed by | Exposure |
 |---|---|---|
-| How | GitHub-hosted runner calls the Hostinger API | A runner *on the VPS* runs `docker compose` |
-| Needs a runner on the box | No | Yes |
-| Needs `HOSTINGER_API_KEY` | Yes | No |
-| Private repos | Needs an SSH deploy key on the VPS | Works as-is |
-| Bind mounts / `build:` | Fine | **Breaks** — see the gotcha below |
-| Best for | Simple stacks, arms-length deploys | Anything needing host state or build context |
+| Backend lab (k3s) | `roles/kubernetes`, tag `k3s` | cluster-internal |
+| GitHub Actions runners | `roles/github_runner`, tag `runner` | — |
+| FinOps Dependabot runner (native) | `roles/github_runner_native` | — |
+| Portainer EE | `roles/portainer`, tag `portainer` | `127.0.0.1:9443` |
+| HashiCorp Vault | `roles/vault` | `127.0.0.1:8200` |
+| RustDesk relay | `roles/rustdesk`, tag `rustdesk` | 21115-21117 |
+| kind / k3d / kubectl / helm | `roles/kubernetes`, tag `k8s_tools` | — |
+| Placeholder app (nginx) | root `docker-compose.yml` | `:80` |
 
-If you are unsure, start with **A**.
+Roughly 12 GB RAM and 145 GB disk free as of the last check, so there's room —
+but it is one box, and CI load competes with the backend lab for it.
 
 ---
 
-## Path A — deploy via the Hostinger API
+## Getting a runner for your repo
 
-No runner needed. A GitHub-hosted runner posts your compose file's URL to
-Hostinger, and the VPS pulls and applies it.
+Every runner on this VPS is defined in one list, so they all get identical
+configuration — same image, same pinned version, same Docker socket setup, same
+naming. You do not install a runner yourself; you add an entry and re-run the
+playbook.
+
+**1. Open a PR against HCW-Hostinger** adding your repo to
+`infrastructure/ansible/roles/github_runner/defaults/main.yml`:
 
 ```yaml
-name: Deploy
+github_runners:
+  - name: personal-site
+    repo: saulpatinojr/personal-site
+    labels: "linux,personal-site"
 
-on:
-  push:
-    branches: [main]
+  - name: my-service                      # ← your entry
+    repo: saulpatinojr/my-service
+    labels: "linux,my-service"
+```
 
+- `name` — short slug. Becomes the compose project (`runner-my-service`) and the
+  runner's name in GitHub.
+- `repo` — `owner/repo`. The runner registers here.
+- `labels` — how your workflow selects it. **Don't include `self-hosted`**;
+  GitHub adds it automatically.
+
+**2. Install the GitHub App on your repo.** The runners authenticate with a
+GitHub App, not a personal token. If the App isn't installed on your repo, the
+container starts, fails to register, and restart-loops. Ask the repo owner to
+add it before merging.
+
+**3. Deploy it.** Actions → **Provision VPS** → `tf_action: apply`,
+`ansible_tags: runner`. That reconciles every runner in the list and touches
+nothing else — no OS upgrade, no reboot.
+
+**4. Use it.** Select by your own label, not `self-hosted`:
+
+```yaml
+jobs:
+  deploy:
+    runs-on: [self-hosted, my-service]
+    timeout-minutes: 15
+```
+
+Selecting bare `self-hosted` will match *any* runner on the box, including
+other people's. Always add your label.
+
+Always set `timeout-minutes`. It's one machine — a hung job blocks everyone
+else's deploys behind it.
+
+---
+
+## Deploying your application
+
+Two paths. If you're unsure, start with A.
+
+| | **A — Hostinger API** | **B — your self-hosted runner** |
+|---|---|---|
+| Needs a runner | No | Yes |
+| Needs `HOSTINGER_API_KEY` | Yes | No |
+| Private repos | Needs a deploy key on the VPS | Works as-is |
+| Bind mounts / `build:` | Fine | **Breaks** — see below |
+| Best for | Simple stacks | Anything needing host state |
+
+### Path A — Hostinger API
+
+```yaml
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
-      - name: Deploy to Hostinger
-        uses: hostinger/deploy-on-vps@v2
+      - uses: hostinger/deploy-on-vps@v2
         with:
           api-key: ${{ secrets.HOSTINGER_API_KEY }}
           virtual-machine: ${{ vars.HOSTINGER_VM_ID }}
@@ -55,83 +111,40 @@ jobs:
             DATABASE_URL=${{ secrets.DATABASE_URL }}
 ```
 
-**Secrets to add to your repo** (Settings → Secrets and variables → Actions):
-
-| Name | Kind | Placeholder |
-|---|---|---|
-| `HOSTINGER_API_KEY` | secret | `hpanel-api-key-goes-here` |
-| `HOSTINGER_VM_ID` | variable | `123456` |
-
-Find the VM ID in the hPanel URL: `https://hpanel.hostinger.com/vps/123456/overview`.
-
-**Private repos** need an SSH deploy key generated on the VPS and added to your
-repo under Settings → Deploy keys, otherwise the VPS cannot pull your compose
-file. See
-[Hostinger's guide](https://www.hostinger.com/support/how-to-deploy-from-private-github-repository-on-hostinger-docker-manager/).
-
----
-
-## Path B — deploy via the self-hosted runner
-
-The VPS runs a containerised GitHub Actions runner. Point a job at it with
-`runs-on: self-hosted`.
+### Path B — your runner
 
 ```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-
-concurrency:
-  group: deploy-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, my-service]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      - name: Deploy
-        run: |
+      - run: |
           docker compose pull
           docker compose up -d --remove-orphans
           docker compose ps
 ```
 
-### Getting the runner to accept your repo
-
-The runner is registered to **one repository at a time** (`RUNNER_SCOPE: repo`).
-It will not pick up jobs from your repo until it is either re-scoped to an
-organisation or given a second runner. Open an issue on HCW-Hostinger rather
-than reconfiguring the box by hand — the runner is managed by
-`roles/github_runner` and manual changes are erased on the next provisioning run.
-
-Always set `timeout-minutes`. A hung job on a single-runner box blocks every
-other repo's deploys behind it.
-
 ---
 
 ## The Docker socket gotcha
 
-**This is the one that will bite you.**
+**This is the one that will cost you an afternoon.**
 
-The runner is itself a container. It talks to the host's Docker daemon through a
-mounted `/var/run/docker.sock`, and its workspace lives in a named volume:
+The runner is itself a container. It reaches the host's Docker daemon through a
+mounted socket, and its workspace lives in a named volume:
 
 ```
-inside the runner container:   /tmp/runner/work/your-repo/your-repo
-on the host:                   /var/lib/docker/volumes/github-runner_runner_work/_data/...
+inside the runner:   /tmp/runner/work/my-service/my-service
+on the host:         /var/lib/docker/volumes/runner-my-service-work/_data/...
 ```
 
-When your job runs `docker compose up`, the compose **client** runs inside the
-runner and reads your compose file from the container's filesystem — that part
-is fine. But it hands the work to the **host** daemon, and the host resolves
-every path against the *host* filesystem.
+`docker compose` runs *inside* the runner and reads your compose file from
+there — fine. But it hands the actual work to the **host** daemon, which
+resolves every path against the *host* filesystem.
 
-So a relative bind mount:
+So this:
 
 ```yaml
 services:
@@ -140,97 +153,82 @@ services:
       - ./config:/etc/app/config     # ❌ silently mounts an empty directory
 ```
 
-...tells the host daemon to mount `/tmp/runner/work/your-repo/your-repo/config`,
-which **does not exist on the host**. Docker creates it as an empty directory
-and your container starts with no config. No error, no warning.
+...asks the host to mount `/tmp/runner/work/my-service/my-service/config`, which
+doesn't exist on the host. Docker creates it empty and your container starts
+with no config. No error. No warning.
 
-The same applies to `build:` contexts — the build context path is resolved by
-the host daemon and will not find your checkout.
+`build:` contexts fail the same way — the host daemon can't find your checkout.
 
-**What works instead:**
+**What works:**
 
 ```yaml
 services:
   app:
-    image: ghcr.io/you/app:1.4.2     # ✅ build elsewhere, pull a tag here
+    image: ghcr.io/you/app:1.4.2     # ✅ build elsewhere, pull a tag
     volumes:
-      - app_config:/etc/app/config   # ✅ named volume, host-daemon managed
-    env_file:
-      - .env                         # ✅ read by the compose client, not the daemon
+      - app_config:/etc/app/config   # ✅ named volume
+    env_file: [.env]                 # ✅ read by the client, not the daemon
 
 volumes:
   app_config:
 ```
 
-Rules of thumb:
-
-- **Build images in a GitHub-hosted job**, push to a registry, and have the
-  self-hosted job pull a tag. Do not `build:` on the runner.
-- **Use named volumes**, never relative bind mounts.
-- **`env_file` and `environment` are safe** — the compose client interpolates
-  them before the daemon ever sees them.
-- If you genuinely need a host path, use an **absolute path that exists on the
-  host** (e.g. `/opt/my-service/config:/etc/app/config`) and put that directory
-  there via Ansible, not from the job.
+- **Build in a GitHub-hosted job**, push to a registry, pull the tag here.
+- **Named volumes**, not relative bind mounts.
+- **`env_file` / `environment` are safe** — interpolated client-side.
+- Need a real host path? Use an absolute one that exists
+  (`/opt/my-service/config:/etc/app/config`) and create it via Ansible, not
+  from the job.
 
 ---
 
-## Ports already in use
+## Ports
 
-Bind something already taken and your container will fail to start, or worse,
-take down a service that was there first.
+| Port | Used by |
+|---|---|
+| 22/tcp | SSH |
+| 80/tcp | placeholder app — replace, don't collide |
+| 443/tcp | open in UFW, unused |
+| 8200, 8201/tcp | Vault (loopback) |
+| 9443/tcp | Portainer (loopback) |
+| 21115-21117/tcp, 21116/udp | RustDesk relay |
 
-| Port | Used by | Notes |
-|---|---|---|
-| 22/tcp | SSH | |
-| 80/tcp | application stack (`docker-compose.yml`) | replace, don't collide |
-| 443/tcp | open in UFW, unused | free for TLS |
-| 8200, 8201/tcp | Vault | loopback only |
-| 9443/tcp | Portainer | loopback only |
-| 21115-21117/tcp, 21116/udp | RustDesk relay | |
+Anything else is available, with two caveats:
 
-Anything else is fair game, but:
-
-1. **UFW denies inbound by default.** A new public port needs a rule added in
-   the relevant Ansible role — not `ufw allow` typed on the box, which the next
-   provisioning run will not know about.
-2. **Publishing a port with `-p` bypasses UFW.** Docker writes its own iptables
-   chain that is consulted *before* UFW's, so a `-p 9000:9000` is reachable from
-   the internet even though UFW says the port is closed. Bind to
-   `127.0.0.1:9000:9000` and reach it over an SSH tunnel unless you genuinely
-   want it public.
-
-To reach a loopback-only service from your laptop:
+1. **UFW denies inbound by default.** A new public port needs a rule in the
+   relevant Ansible role. `ufw allow` typed on the box is not configuration —
+   it's a change the repo doesn't know about.
+2. **`-p` publishing bypasses UFW.** Docker writes its own iptables chain,
+   consulted *before* UFW's, so `-p 9000:9000` is reachable from the internet
+   even when UFW says that port is closed. Bind `127.0.0.1:9000:9000` and use
+   an SSH tunnel unless you genuinely want it public.
 
 ```bash
 ssh -L 9443:127.0.0.1:9443 <user>@<vps-host> -N
-# then open https://localhost:9443
 ```
 
 ---
 
-## Secrets: placeholders
+## Secrets
 
-Never commit real values. Fill these in per repo:
+Never commit real values.
 
 ```bash
 # Path A only
 HOSTINGER_API_KEY=hpanel-api-key-goes-here
-HOSTINGER_VM_ID=123456                        # repository *variable*, not secret
+HOSTINGER_VM_ID=123456          # repository *variable*, not a secret
 
-# Your application's own secrets
+# Your app's own
 DATABASE_URL=postgres://user:password@host:5432/dbname
 API_TOKEN=replace-me
 ```
-
-Push them with the `gh` CLI:
 
 ```bash
 gh secret set HOSTINGER_API_KEY --body "hpanel-api-key-goes-here"
 gh variable set HOSTINGER_VM_ID --body "123456"
 ```
 
-Pass them into containers through the workflow — do not bake them into images:
+Pass them in at deploy time; don't bake them into images:
 
 ```yaml
       - name: Deploy
@@ -239,36 +237,38 @@ Pass them into containers through the workflow — do not bake them into images:
         run: docker compose up -d
 ```
 
-The VPS runs a Vault instance for shared secrets. It is loopback-only and
-manually unsealed, so treat it as available-but-not-guaranteed; see the
-[Vault runbook](https://github.com/saulpatinojr/HCW-Hostinger/blob/main/VAULT-WORKFLOW-RUNBOOK.md).
+Vault runs on the box for shared secrets, but it is **currently uninitialised**
+— treat it as unavailable until the runbook's `vault operator init` step has
+been done.
 
 ---
 
 ## Checklist
 
-- [ ] Picked path A or B
-- [ ] Secrets and variables added to your repo
-- [ ] Compose file uses **pinned image tags**, not `:latest`
+- [ ] Runner entry merged into `github_runners`, GitHub App installed on your repo
+- [ ] `Provision VPS` run with `ansible_tags: runner`
+- [ ] Workflow selects `[self-hosted, your-label]`, not bare `self-hosted`
+- [ ] `timeout-minutes` and a `concurrency` group on the deploy job
+- [ ] Pinned image tags, not `:latest`
 - [ ] No relative bind mounts, no `build:` (path B)
 - [ ] Named volumes for anything that must survive a redeploy
-- [ ] Ports checked against the table above
-- [ ] `restart: unless-stopped` on long-running services
-- [ ] `timeout-minutes` and a `concurrency` group on the deploy job
-- [ ] Deployed once and verified with **VPS Diagnostics** on HCW-Hostinger
+- [ ] Ports checked against the table
+- [ ] Verified with **VPS Diagnostics**
 
 ---
 
 ## When it goes wrong
 
-| Symptom | Likely cause |
+| Symptom | Cause |
 |---|---|
-| Container starts, config is empty | Relative bind mount — see the gotcha |
+| Container starts, config empty | Relative bind mount — see the gotcha |
 | Job queues forever | Runner offline, or busy with another repo's job |
-| Port unreachable from outside | UFW rule missing (or you wanted loopback) |
-| Port reachable that shouldn't be | `-p` published past UFW — bind to `127.0.0.1` |
-| `docker compose` says image not found | Registry auth missing on the VPS |
-| Vault reads fail | Vault sealed after a reboot — needs manual unseal |
+| Runner restart-loops, never registers | GitHub App not installed on your repo |
+| Your job ran on someone else's runner | Selected bare `self-hosted` |
+| Port unreachable from outside | UFW rule missing |
+| Port reachable that shouldn't be | `-p` published past UFW — bind loopback |
+| Vault reads fail | Vault is uninitialised / sealed |
+| Config reverted after a few days | You changed it on the box, not in the repo |
 
-Run **VPS Diagnostics** on HCW-Hostinger for a read-only snapshot of the host:
-containers, disk, memory, listening ports, and UFW status.
+**VPS Diagnostics** on HCW-Hostinger gives a read-only snapshot: containers,
+disk, memory, listening ports, UFW status, and runner health.
