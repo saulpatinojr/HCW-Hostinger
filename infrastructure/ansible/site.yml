@@ -18,11 +18,11 @@
       tags: [common, base]
     - role: docker          # Docker Engine + Compose plugin
       tags: [docker, base]
-    - role: portainer       # Portainer CE for Docker visibility (SSH tunnel)
+    - role: portainer       # Portainer EE for Docker visibility (SSH tunnel)
       tags: [portainer]
-    - role: github_runner   # runner as Docker container via myoung34/github-runner
+    - role: github_runner   # one container per repo, from the github_runners list
       tags: [runner, github_runner]
-    - role: kubernetes      # kind, k3d, kubectl, helm for training
+    - role: kubernetes      # k3d backend lab + kind/kubectl/helm tooling
       tags: [kubernetes, k8s]
     - role: rustdesk        # RustDesk Server OSS (hbbs + hbbr) remote-desktop relay
       tags: [rustdesk]

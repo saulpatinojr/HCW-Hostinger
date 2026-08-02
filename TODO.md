@@ -13,7 +13,7 @@ Tracked improvements and next steps for the HCW-Hostinger VPS stack.
 - [ ] **Replace nginx placeholder** with the real application.
 - [ ] **Add TLS / HTTPS to the app** — Let's Encrypt via Certbot or Traefik. Port 443 is already open in UFW; needs an nginx config and a renewal cron.
 - [ ] **Drop the unused `hostinger` Terraform provider** — `main.tf` only manages a `local_file`. The `required_providers` entry and `provider "hostinger"` block force a provider download and an API token on every run for nothing.
-- [ ] **Add a workflow for `deploy-finops-runner.yml`** — the playbook exists but nothing invokes it, so the FinOps runner can only be rebuilt from an Ansible control host by hand.
+- [ ] **Add a `hcw-deploy` runner entry** — `multi-env-deploy.yml` now targets `[self-hosted, hcw-deploy]` instead of bare `self-hosted` (which would match any repo's runner). `github_runners` must contain an entry carrying that label or the app deploy queues forever. See docs/REBUILD-RUNBOOK.md step 5.
 - [ ] **Plan a k3s upgrade path** — `roles/kubernetes` adopts k3s but never upgrades it, so a stale cluster will not be noticed by a provisioning run (ADR-0016). Needs a deliberate, separately-triggered upgrade procedure.
 - [ ] **Reap stale dependabot containers** — two `dependabot-job-*` containers were up 3 days. Nothing cleans them up.
 
@@ -52,3 +52,4 @@ Tracked improvements and next steps for the HCW-Hostinger VPS stack.
 - [x] **Pin container image tags** — runner, Portainer, RustDesk, kind/k3d/helm/kubectl are all pinned. The nginx placeholder is still `:alpine`, but it is a placeholder.
 - [x] **Pin the k3d and helm installers** — both now install from pinned release artefacts instead of `curl | bash` off each project's `main` branch (ADR-0016).
 - [x] **Terraform fmt / validate in CI** — added in `ci.yml`.
+- [x] **Add a workflow for `deploy-finops-runner.yml`** — `Deploy FinOps Runner`, taking the short-lived registration token as a masked workflow input rather than storing a long-lived admin credential.

@@ -68,7 +68,8 @@ action.yaml            vendored Hostinger deploy action (see docs/)
 | Workflow | Trigger | Does |
 |---|---|---|
 | **Provision VPS** | manual | `terraform apply` → `ansible-playbook site.yml` |
-| **Multi-Environment Deploy** | push to `main`/`staging` | `docker compose pull && up -d` on the runner |
+| **Multi-Environment Deploy** | push to `main`/`staging` | `docker compose pull && up -d` on the `hcw-deploy` runner |
+| **Deploy FinOps Runner** | manual | targeted playbook for the native Dependabot runner |
 | **VPS Diagnostics** | manual | read-only health report over SSH |
 | **Vault Provision** | manual | installs/removes the Vault service |
 | **Vault Config** | manual | Terraform-managed Vault policies and auth |
@@ -148,14 +149,16 @@ Authorised keys are managed declaratively — add the public key to
 `ssh_authorized_keys` in `roles/common/defaults/main.yml` so it survives
 re-provisioning instead of being appended to the box by hand.
 
-## First-time bring-up
+## Bringing up a bare VPS
 
-1. Create the VPS in hPanel, note the ID and IP.
-2. Add an SSH public key to the VPS and load the secrets above.
-3. Run **Provision VPS** with `tf_action=apply`, `ansible_tags` blank.
-4. Run **VPS Diagnostics** to confirm the state of the box.
-5. For Vault, follow [VAULT-WORKFLOW-RUNBOOK.md](./VAULT-WORKFLOW-RUNBOOK.md) —
-   `vault operator init` and unsealing stay manual by design.
+Follow [**docs/REBUILD-RUNBOOK.md**](./docs/REBUILD-RUNBOOK.md) — the ordered
+procedure for building this box from a wiped OS, including what is *not* in the
+repo and must be reapplied by hand (Portainer EE licence, Vault init, runner
+registrations, the RustDesk public key).
+
+Short version: get SSH working via hPanel first, then `ansible_tags` one at a
+time — `base` → `k3d` → `rustdesk` → `runner` → `portainer` — with **VPS
+Diagnostics** between each. Vault last, since it seals on reboot.
 
 ## Things to know before you touch this
 

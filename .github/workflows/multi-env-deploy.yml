@@ -13,7 +13,15 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    # Labelled, not bare `self-hosted`. Bare would match ANY runner on the VPS,
+    # including ones registered for other repos — which is exactly what
+    # docs/wiki/Deploying-to-the-VPS.md tells everyone else not to do.
+    #
+    # Requires an entry in `github_runners` whose labels include `hcw-deploy`.
+    # On a freshly rebuilt VPS that runner does not exist yet, so this job will
+    # sit queued until it does. See docs/REBUILD-RUNBOOK.md — the runner comes
+    # before the first push to main.
+    runs-on: [self-hosted, hcw-deploy]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
