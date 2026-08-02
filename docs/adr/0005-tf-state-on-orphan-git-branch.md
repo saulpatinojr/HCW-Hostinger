@@ -2,7 +2,16 @@
 
 ## Status
 
-Accepted — 2026-06-26
+**Superseded for the root module** by
+[ADR-0017](./0017-drop-terraform-from-the-provisioning-path.md) — 2026-08-02.
+The root module's only resource was a `local_file` whose output nothing read,
+so the state it persisted described nothing. Terraform has been removed from
+the provisioning path entirely.
+
+**Still in force for `infrastructure/terraform/vault-config`**, which manages
+real Vault objects and keeps its state on this branch.
+
+Originally accepted — 2026-06-26
 **Revisit when:** team grows beyond 2-3 engineers, or state begins containing secrets.
 
 ## Context

@@ -78,7 +78,7 @@ failure here is an access problem, and every later step inherits it.
 ## 2. Base system
 
 ```
-Provision VPS  →  tf_action: apply  →  ansible_tags: base
+Provision VPS  →  ansible_tags: base
 ```
 
 Runs `common` and `docker`: dist-upgrade, UFW, SSH hardening, authorised keys,

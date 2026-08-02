@@ -1,129 +1,43 @@
 name: Provision VPS
 
+# Ansible only. This workflow used to run a Terraform job first, whose sole
+# resource was a `local_file` writing the Ansible inventory — but the Ansible
+# job runs on a separate runner with its own checkout and writes its own
+# inventory from secrets, so Terraform's output was never read by anything.
+# Its `vps_ip` output was likewise declared and never consumed. See ADR-0017.
+#
+# Vault's Terraform root (infrastructure/terraform/vault-config) manages real
+# resources and keeps its own state; `Vault Config` is unaffected by this.
+
 on:
   workflow_dispatch:
     inputs:
-      tf_action:
-        description: "Terraform action"
-        required: true
-        default: apply
-        type: choice
-        options: [plan, apply, destroy]
       ansible_tags:
-        description: "Limit provisioning to these Ansible tags (comma-separated; blank = every role). e.g. rustdesk, portainer, runner"
+        description: "Limit provisioning to these tags (comma-separated; blank = every role). e.g. rustdesk, portainer, runner, k3d"
         required: false
         default: ""
         type: string
+      dry_run:
+        description: "List the tasks that would run, and change nothing on the VPS"
+        required: false
+        default: false
+        type: boolean
 
-# Serialise applies: two concurrent runs would race each other pushing
-# terraform.tfstate to the tf-state branch, and the loser's state is lost.
-# Queue rather than cancel — a cancelled apply can leave the VPS half-built.
+# Serialise runs. Two concurrent plays against one host fight over the apt
+# lock, the Docker socket and compose projects. Queue rather than cancel — a
+# cancelled run can leave the VPS half-built.
 concurrency:
   group: provision-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  TF_DIR: infrastructure/terraform
   ANSIBLE_DIR: infrastructure/ansible
 
 jobs:
-  terraform:
-    name: Terraform ${{ inputs.tf_action }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    outputs:
-      vps_ip: ${{ steps.tf_output.outputs.vps_ip }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Restore Terraform state
-        run: |
-          # actions/checkout only fetches the ref that triggered the run, so
-          # origin/tf-state does not exist locally until we fetch it. Testing
-          # for the ref before fetching meant this check always failed and the
-          # state was never restored — every apply started from empty state.
-          # (Symptom: every commit on tf-state has "serial": 1.)
-          git fetch origin tf-state 2>/dev/null || true
-          # cat-file -e checks existence without printing state content to logs
-          if git cat-file -e origin/tf-state:terraform.tfstate 2>/dev/null; then
-            git show origin/tf-state:terraform.tfstate > $TF_DIR/terraform.tfstate
-          fi
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "~1.9"
-          terraform_wrapper: false
-
-      - name: Terraform init
-        run: terraform init
-        working-directory: ${{ env.TF_DIR }}
-
-      # The Hostinger provider doesn't support firewall resources, so purge any
-      # leftover entries from the restored tf-state. `|| true` keeps the step
-      # green when the entries are already absent (fresh state, re-runs).
-      - name: Prune unsupported firewall resources from state
-        run: |
-          for r in hostinger_vps_firewall_rule.ssh \
-                   hostinger_vps_firewall_rule.http \
-                   hostinger_vps_firewall_rule.https; do
-            terraform state rm "$r" 2>/dev/null || true
-          done
-        working-directory: ${{ env.TF_DIR }}
-
-      - name: Terraform ${{ inputs.tf_action }}
-        run: |
-          if [ "${{ inputs.tf_action }}" = "plan" ]; then
-            terraform plan
-          else
-            terraform ${{ inputs.tf_action }} -auto-approve
-          fi
-        working-directory: ${{ env.TF_DIR }}
-        env:
-          TF_VAR_hostinger_api_key: ${{ secrets.HOSTINGER_API_KEY }}
-          TF_VAR_vm_id: ${{ vars.HOSTINGER_VM_ID }}
-          TF_VAR_vps_ip: ${{ secrets.VPS_SSH_HOST }}
-          TF_VAR_ssh_user: ${{ secrets.VPS_SSH_USERNAME }}
-
-      - name: Capture Terraform outputs
-        id: tf_output
-        if: inputs.tf_action == 'apply'
-        run: |
-          echo "vps_ip=$(terraform output -raw vps_ip)" >> $GITHUB_OUTPUT
-        working-directory: ${{ env.TF_DIR }}
-
-      - name: Commit Terraform state to tf-state branch
-        if: inputs.tf_action != 'plan'
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          ORIG_BRANCH=$(git symbolic-ref --short HEAD)
-          git fetch origin tf-state 2>/dev/null || true
-
-          # Orphan branch to keep state separate from working tree
-          if ! git rev-parse --verify origin/tf-state &>/dev/null; then
-            git checkout --orphan tf-state
-            git rm -rf . --quiet
-          else
-            git checkout tf-state
-          fi
-
-          cp $TF_DIR/terraform.tfstate terraform.tfstate
-          git add terraform.tfstate
-          git diff --cached --quiet || git commit -m "chore: update terraform state [skip ci]"
-          git push origin tf-state
-          git checkout "$ORIG_BRANCH"
-
   ansible:
     name: Ansible provision
-    needs: terraform
-    if: inputs.tf_action == 'apply'
     runs-on: ubuntu-latest
-    # Generous timeout: covers dist-upgrade + optional reboot wait (≤5 min) + all roles
+    # Generous: covers dist-upgrade + optional reboot wait (≤5 min) + all roles
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -153,21 +67,31 @@ jobs:
         working-directory: ${{ env.ANSIBLE_DIR }}
 
       - name: Run playbook
-        # Playbook is fully idempotent — safe to re-run at any point.
-        # If a dist-upgrade requires a kernel reboot, Ansible reboots the VPS
-        # and waits up to 5 minutes for SSH to recover before continuing.
+        # Playbook is idempotent — safe to re-run at any point. If a
+        # dist-upgrade requires a kernel reboot, Ansible reboots the VPS and
+        # waits up to 5 minutes for SSH to recover before continuing.
+        #
+        # dry_run uses --list-tasks rather than --check: check mode is
+        # unreliable across the command and docker_compose_v2 tasks this
+        # playbook uses, and would report failures that mean nothing.
+        # --list-tasks never connects to the host at all.
         env:
           ANSIBLE_TAGS: ${{ inputs.ansible_tags }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          TAG_ARGS=()
+          ARGS=()
           if [ -n "$ANSIBLE_TAGS" ]; then
-            TAG_ARGS=(--tags "$ANSIBLE_TAGS")
+            ARGS+=(--tags "$ANSIBLE_TAGS")
             echo "Limiting provisioning to tags: $ANSIBLE_TAGS"
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS+=(--list-tasks)
+            echo "Dry run — listing tasks only, the VPS will not be touched."
           fi
 
           ansible-playbook site.yml \
             --private-key /tmp/vps_key \
-            "${TAG_ARGS[@]}" \
+            "${ARGS[@]}" \
             -e "github_app_id=${{ secrets.GH_APP_ID }}" \
             -e "github_app_installation_id=${{ secrets.GH_APP_INSTALLATION_ID }}" \
             -e "github_app_private_key=${{ secrets.GH_APP_PRIVATE_KEY }}"

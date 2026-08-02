@@ -76,7 +76,7 @@ github_runners:
 App, not a personal token. Without it on your repo the container starts, fails
 to register, and restart-loops. Ask the repo owner before merging.
 
-**4. Deploy it.** Actions → **Provision VPS** → `tf_action: apply`,
+**4. Deploy it.** Actions → **Provision VPS** →
 `ansible_tags: runner`. That reconciles every runner in the list and touches
 nothing else — no OS upgrade, no reboot.
 

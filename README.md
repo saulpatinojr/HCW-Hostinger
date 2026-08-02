@@ -67,7 +67,7 @@ action.yaml            vendored Hostinger deploy action (see docs/)
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| **Provision VPS** | manual | `terraform apply` → `ansible-playbook site.yml` |
+| **Provision VPS** | manual | `ansible-playbook site.yml`, tag-scoped, with a `dry_run` preview |
 | **Multi-Environment Deploy** | push to `main`/`staging` | `docker compose pull && up -d` on the `hcw-deploy` runner |
 | **Deploy FinOps Runner** | manual | targeted playbook for the native Dependabot runner |
 | **VPS Diagnostics** | manual | read-only health report over SSH |
@@ -90,11 +90,16 @@ This matters: the `common` role runs a `dist-upgrade` and **reboots the VPS** if
 the kernel changed (ADR-0007). Tag-limiting avoids an unplanned reboot when you
 only meant to bounce one service.
 
+Set `dry_run: true` to list exactly which tasks a tag selection would run
+without connecting to the VPS at all — worth doing before any tag you haven't
+run before.
+
 Locally, the same thing:
 
 ```bash
 cd infrastructure/ansible
 ansible-playbook site.yml --tags rustdesk
+ansible-playbook site.yml --tags rustdesk --list-tasks   # the dry_run equivalent
 ```
 
 ## Required secrets and variables
@@ -169,8 +174,11 @@ Diagnostics** between each. Vault last, since it seals on reboot.
   also no auto-unseal, so a reboot re-seals it.
 - **The runner is privileged and mounts the Docker socket** (ADR-0013). A job on
   this runner is effectively root on the host.
-- **Terraform state lives on the orphan `tf-state` branch** (ADR-0005), not in a
-  real backend. `Provision VPS` serialises itself to avoid clobbering it.
+- **`Provision VPS` is Ansible only.** It used to run Terraform first, but that
+  module's one resource wrote an inventory file the Ansible job never read —
+  it writes its own from secrets. Removed in ADR-0017. Only
+  `infrastructure/terraform/vault-config` still uses Terraform, and only
+  `Vault Config` still uses the `tf-state` branch.
 - **Port 80 is the application stack.** Check the table above before binding a
   new port from another repo.
 
