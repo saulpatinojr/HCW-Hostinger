@@ -1,10 +1,10 @@
 ---
 # ─────────────────────────────────────────────────────────────────────────────
-# Backend lab: k3s
+# Host-level k3s — off by default (k3s_manage: false)
 #
-# Adopt-only. k3s already serves live workloads on this host, so this section
-# must be safe on every provisioning pass. It installs only when k3s is absent,
-# and otherwise just asserts the service state.
+# Adopt-only when enabled: installs when absent, otherwise just asserts the
+# service state. It never upgrades and never uninstalls, so enabling it against
+# a host that already runs k3s is safe.
 # ─────────────────────────────────────────────────────────────────────────────
 - name: Check whether k3s is installed
   ansible.builtin.stat:
@@ -80,8 +80,8 @@
     url: "https://github.com/k3d-io/k3d/releases/download/v{{ k3d_version }}/k3d-linux-amd64"
     dest: /usr/local/bin/k3d
     mode: "0755"
-  when: k8s_tools_manage | bool
-  tags: [k8s_tools]
+  when: k8s_tools_manage | bool or k3d_manage | bool
+  tags: [k8s_tools, k3d]
 
 - name: Resolve the latest stable kubectl version
   ansible.builtin.uri:
@@ -151,3 +151,14 @@
     label: "{{ item.item | default('') }}"
   when: k8s_tools_manage | bool
   tags: [k8s_tools]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend lab: k3d clusters
+#
+# Runs last: cluster creation needs the k3d binary installed above, and Docker
+# from the docker role.
+# ─────────────────────────────────────────────────────────────────────────────
+- name: Reconcile k3d clusters
+  ansible.builtin.include_tasks: k3d-clusters.yml
+  when: k3d_manage | bool
+  tags: [k3d]

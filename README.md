@@ -16,8 +16,8 @@ without hand-editing the server.**
 | Docker Engine + Compose v2 | `roles/docker` | — | `docker` |
 | Portainer **EE** 2.39.4 | `roles/portainer` | `127.0.0.1:9443` (SSH tunnel) | `portainer` |
 | GitHub Actions runners (one per repo) | `roles/github_runner` | — | `runner` |
-| **k3s** — the backend lab | `roles/kubernetes` | cluster-internal | `k3s` |
-| kind / k3d / kubectl / helm | `roles/kubernetes` | — | `k8s_tools` |
+| **k3d** — the backend lab | `roles/kubernetes` | `127.0.0.1:8081` (SSH tunnel) | `k3d` |
+| kind / kubectl / helm | `roles/kubernetes` | — | `k8s_tools` |
 | RustDesk relay (hbbs + hbbr) | `roles/rustdesk` | 21115-21117/tcp, 21116/udp | `rustdesk` |
 | HashiCorp Vault | `roles/vault` | `127.0.0.1:8200` (SSH tunnel) | *(separate playbook)* |
 | FinOps Dependabot runner (native) | `roles/github_runner_native` | — | *(separate playbook)* |
