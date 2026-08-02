@@ -4,6 +4,7 @@
 
 | Page | For |
 |---|---|
+| [Rebuild Runbook](./REBUILD-RUNBOOK.md) | Rebuilding the VPS from a wiped OS, step by step |
 | [Deploying to the VPS](./wiki/Deploying-to-the-VPS.md) | Other repos that need to deploy onto this VPS |
 | [FinOps Dependabot runner](./finops-dependabot-runner.md) | The dedicated native runner |
 | [Vendored Hostinger deploy action](./hostinger-deploy-action.md) | Upstream `action.yaml` usage |

@@ -1,0 +1,77 @@
+name: Deploy FinOps Runner
+
+# The playbook existed but nothing invoked it, so the FinOps Dependabot runner
+# could only be rebuilt by hand from an Ansible control host. That is a hole in
+# "restore the VPS from CI" — this closes it.
+#
+# The registration token is a workflow input rather than a stored secret: it is
+# valid for one hour, and roles/github_runner_native deliberately never writes
+# it to disk. Mint one immediately before running:
+#
+#   gh api --method POST \
+#     repos/<owner>/<repo>/actions/runners/registration-token --jq .token
+#
+on:
+  workflow_dispatch:
+    inputs:
+      registration_token:
+        description: "Short-lived runner registration token (expires in 1 hour). Leave blank if the runner is already configured on the host."
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: finops-runner
+  cancel-in-progress: false
+
+env:
+  ANSIBLE_DIR: infrastructure/ansible
+
+jobs:
+  deploy:
+    name: Deploy FinOps runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # workflow_dispatch inputs are echoed into the run's metadata, so register
+      # it as a masked value before it can appear in any later step's output.
+      - name: Mask the registration token
+        if: inputs.registration_token != ''
+        run: echo "::add-mask::${{ inputs.registration_token }}"
+
+      - name: Write SSH private key
+        run: |
+          echo "${{ secrets.VPS_SSH_KEY }}" | base64 -d > "$RUNNER_TEMP/vps_key"
+          chmod 600 "$RUNNER_TEMP/vps_key"
+
+      - name: Generate Ansible inventory
+        run: |
+          mkdir -p ${{ env.ANSIBLE_DIR }}/inventory
+          cat > ${{ env.ANSIBLE_DIR }}/inventory/hosts.yml << 'EOF'
+          all:
+            hosts:
+              vps:
+                ansible_host: ${{ secrets.VPS_SSH_HOST }}
+                ansible_user: ${{ secrets.VPS_SSH_USERNAME }}
+                ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+          EOF
+
+      - name: Install Ansible
+        run: pip install --quiet ansible
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+        working-directory: ${{ env.ANSIBLE_DIR }}
+
+      # The playbook intentionally omits common/docker/portainer/kubernetes, so
+      # adding a runner cannot reconfigure the rest of the VPS.
+      - name: Run the targeted playbook
+        env:
+          REGISTRATION_TOKEN: ${{ inputs.registration_token }}
+        run: |
+          ansible-playbook deploy-finops-runner.yml \
+            --private-key "$RUNNER_TEMP/vps_key" \
+            -e "github_runner_native_registration_token=$REGISTRATION_TOKEN"
+        working-directory: ${{ env.ANSIBLE_DIR }}
