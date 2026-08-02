@@ -10,3 +10,4 @@
     - portainer       # Portainer CE for Docker visibility (access via SSH tunnel)
     - github_runner   # runner as Docker container via myoung34/github-runner
     - kubernetes      # kind, k3d, kubectl, helm for training
+    - rustdesk        # RustDesk Server OSS (hbbs + hbbr) remote-desktop relay

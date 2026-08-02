@@ -1,0 +1,33 @@
+---
+rustdesk_dir: /opt/rustdesk
+
+# Pinned rather than :latest — see TODO.md "Pin container image tags".
+rustdesk_image: rustdesk/rustdesk-server:1.1.16
+
+# Name the volume explicitly so it is independent of the compose project
+# prefix. The hbbs keypair lives here; losing it re-keys every client.
+rustdesk_volume: rustdesk_data
+
+# Public hostname or IP that clients should use for relay traffic. Leave empty
+# on a single-host deployment: hbbs then hands clients the address they already
+# reached it on, which is what we want.
+rustdesk_relay_host: ""
+
+# Require clients to present the server's public key before they may register.
+# Without this, anyone who knows the IP can relay through the VPS.
+rustdesk_require_key: true
+
+# Browser-based web client. Off by default: on 21118/21119 hbbs/hbbr trust
+# X-Real-IP / X-Forwarded-For without validating them, so those ports should
+# only be exposed behind a reverse proxy that overwrites both headers.
+rustdesk_websocket_enabled: false
+
+rustdesk_ports_tcp:
+  - 21115   # hbbs — NAT type test
+  - 21116   # hbbs — ID registration / rendezvous
+  - 21117   # hbbr — relay
+rustdesk_ports_udp:
+  - 21116   # hbbs — heartbeat
+rustdesk_websocket_ports_tcp:
+  - 21118   # hbbs — websocket
+  - 21119   # hbbr — websocket

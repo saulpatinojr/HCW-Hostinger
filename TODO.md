@@ -4,6 +4,7 @@ Tracked improvements and next steps for the HCW-Hostinger self-hosted runner sta
 
 ## Infrastructure
 
+- [ ] **Fix VPS SSH authentication** — the `VPS Diagnostics` workflow fails at the SSH handshake (`unable to authenticate, attempted methods [none publickey]`). Last green run was 2026-06-30. `provision.yml` uses the same `VPS_SSH_KEY` secret, so Ansible provisioning is blocked until the key (or the VPS `authorized_keys` entry) is restored.
 - [ ] **Migrate Terraform state to Terraform Cloud** — replace orphan `tf-state` git branch with HCP Terraform free-tier remote backend. Enables real state locking, audit log, and removes the "never commit state" violation. See ADR-0011 and [blog post](./docs/blog/07-terraform-cloud-state-backend.md).
 - [ ] **Pin container image tags** — replace `:latest` with specific version tags in all compose files (`myoung34/github-runner`, `portainer/portainer-ce`, `nginx`). Prevents surprise breaking changes on next `docker compose pull`.
 - [ ] **Add TLS / HTTPS to the app** — provision a Let's Encrypt certificate via Certbot or Traefik. The VPS already has port 443 open in UFW; just needs an nginx config update and a cert renewal cron.
@@ -24,7 +25,7 @@ Tracked improvements and next steps for the HCW-Hostinger self-hosted runner sta
 
 ## Resilience
 
-- [ ] **Set up automated backups** — back up named Docker volumes (`portainer_data`, `runner_work`) to Hostinger object storage or an S3-compatible bucket on a schedule.
+- [ ] **Set up automated backups** — back up named Docker volumes (`portainer_data`, `runner_work`, `rustdesk_data`) to Hostinger object storage or an S3-compatible bucket on a schedule. `rustdesk_data` is the highest priority of the three: it holds the hbbs `id_ed25519` keypair, and losing it forces every RustDesk client to be re-keyed by hand. See ADR-0015.
 - [ ] **Add staging environment** — duplicate the runner + app stack under a `staging` label. The `multi-env-deploy.yml` workflow already branches on `github.ref`; just needs a second compose profile.
 
 ## Developer Experience

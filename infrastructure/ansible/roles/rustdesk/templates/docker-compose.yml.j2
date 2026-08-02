@@ -1,0 +1,27 @@
+services:
+  hbbs:
+    image: {{ rustdesk_image }}
+    command: {{ (['hbbs']
+                 + (['-k', '_'] if rustdesk_require_key else [])
+                 + (['-r', rustdesk_relay_host] if rustdesk_relay_host else [])) | to_json }}
+    # Host networking, deliberately. hbbs needs the real client source address
+    # for NAT type detection, and host mode keeps these ports under UFW instead
+    # of Docker's iptables chain punching past it. See ADR-0015.
+    network_mode: host
+    volumes:
+      - {{ rustdesk_volume }}:/root
+    depends_on:
+      - hbbr
+    restart: unless-stopped
+
+  hbbr:
+    image: {{ rustdesk_image }}
+    command: {{ (['hbbr'] + (['-k', '_'] if rustdesk_require_key else [])) | to_json }}
+    network_mode: host
+    volumes:
+      - {{ rustdesk_volume }}:/root
+    restart: unless-stopped
+
+volumes:
+  {{ rustdesk_volume }}:
+    name: {{ rustdesk_volume }}

@@ -81,5 +81,24 @@ jobs:
             fi
             echo ""
 
+            echo "====== RUSTDESK ======"
+            RUSTDESK_IDS=$(docker ps -q --filter "name=rustdesk" 2>/dev/null)
+            if [ -n "$RUSTDESK_IDS" ]; then
+              docker ps --filter "name=rustdesk" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+              echo ""
+              echo "Public key (clients must be configured with this):"
+              cat /var/lib/docker/volumes/rustdesk_data/_data/id_ed25519.pub 2>/dev/null \
+                || echo "Keypair not generated yet"
+            else
+              echo "RustDesk containers not found or not running"
+            fi
+            echo ""
+
             echo "====== NETWORK ======"
-            ss -tlnp | grep -E '80|443|22|9443|8200' || true
+            echo "-- listening (tcp) --"
+            ss -tlnp | grep -E ':(22|80|443|9443|8200|2111[5-9])\b' || true
+            echo "-- listening (udp) --"
+            ss -ulnp | grep -E ':21116\b' || true
+            echo ""
+            echo "-- ufw --"
+            ufw status verbose 2>/dev/null || echo "ufw not available"
