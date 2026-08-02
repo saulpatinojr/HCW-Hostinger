@@ -36,6 +36,13 @@ Three things depend on each other, so the sequence is not negotiable:
 SSH key on the box  →  Ansible can run  →  runner exists  →  app deploys
 ```
 
+The first link is handled by Terraform now (step 0) — the key is installed at
+VPS creation rather than through the panel afterwards. The rest still applies.
+
+**Do not delete the `tf-state` branch.** It now records that your server
+exists. Without it, the next `VPS Lifecycle` apply builds a *second* billable
+VPS instead of recognising the one you have.
+
 `multi-env-deploy.yml` targets `[self-hosted, hcw-deploy]`. On a fresh VPS that
 runner does not exist, so **any push to `main` will sit queued** until step 5
 completes. That is deliberate — the alternative is bare `self-hosted`, which
@@ -43,25 +50,58 @@ would grab whichever unrelated runner happened to be free.
 
 ---
 
-## 1. Wipe and get SSH working
+## 0. Bring the VPS under Terraform (once)
 
-Reinstall the OS from hPanel, then add your public key via **hPanel → VPS → SSH
-Keys**. Nothing else in this runbook works until this does, and you cannot use
-Ansible to fix it — this is the bootstrap.
+Skip if `VPS Lifecycle` has already been applied.
 
-Generate the key if you need one:
+Terraform owns the machine and the SSH key installed on it (ADR-0018), which is
+what removes the bootstrap gap — Hostinger installs the key during
+provisioning, so the box is reachable the moment it boots.
+
+**a. Find the real ids.** `plan`, `template_id` and `data_center_id` are
+account-specific. Run **Discover Hostinger Options** — read-only, declares no
+resources — and read them off the job summary.
+
+**b. Fill in `infrastructure/terraform/terraform.tfvars`** from
+`terraform.tfvars.example`, including the *public* key:
 
 ```powershell
 .\scripts\New-VpsSshKey.ps1 -App hcwhostinger -Purpose ci
 ```
 
-Then check the secrets still match the rebuilt host:
+Put the base64 of the **private** half in `VPS_SSH_KEY`.
+
+**c. Adopt the existing VM** rather than creating a new one:
+
+```
+VPS Lifecycle  →  action: import  →  import_vps_id: 939861
+```
+
+Import keeps the same IP and avoids a second billable server. An `apply` with
+no state would create one alongside the machine you already have.
+
+**d. Check the plan is empty-ish:**
+
+```
+VPS Lifecycle  →  action: plan
+```
+
+A plan proposing to *replace* the VPS means one of the tfvars doesn't match
+reality. Fix the tfvars — do not apply. `prevent_destroy` will block it anyway,
+which is the point.
+
+## 1. Wipe and confirm SSH
+
+Reinstall the OS from hPanel. The key registered in step 0 is reinstalled with
+it, so no browser-console step is needed.
+
+Then confirm the secrets match the host:
 
 | Secret | Check |
 |---|---|
-| `VPS_SSH_HOST` | **A rebuilt VM may have a new IP.** Verify it |
+| `VPS_SSH_HOST` | Must equal `vps_ip` from the `VPS Lifecycle` job summary |
 | `VPS_SSH_USERNAME` | usually `root` |
-| `VPS_SSH_KEY` | base64 of the key you just installed |
+| `VPS_SSH_KEY` | base64 of the private half of the key in your tfvars |
 
 The host key changes on a rebuild, so your workstation will refuse to connect
 until you clear the old entry:

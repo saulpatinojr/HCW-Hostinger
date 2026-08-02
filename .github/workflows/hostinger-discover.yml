@@ -1,0 +1,64 @@
+name: Discover Hostinger Options
+
+# `hostinger_vps` requires plan, template_id and data_center_id, and those IDs
+# are account- and region-specific. This prints the real values so they can be
+# chosen rather than guessed.
+#
+# Read-only by construction: infrastructure/terraform/discover declares only
+# data sources, so there is nothing an apply here could create or destroy. No
+# state is kept — every run is a fresh read.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: hostinger-discover
+  cancel-in-progress: true
+
+env:
+  TF_DIR: infrastructure/terraform/discover
+
+jobs:
+  discover:
+    name: Discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init -backend=false
+        working-directory: ${{ env.TF_DIR }}
+
+      # `apply` on a root with no resources just resolves the data sources.
+      # -auto-approve is safe here precisely because there is nothing to approve.
+      - name: Read Hostinger catalogue
+        run: terraform apply -auto-approve -no-color
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_hostinger_api_key: ${{ secrets.HOSTINGER_API_KEY }}
+
+      - name: Publish results to the job summary
+        run: |
+          {
+            echo "# Hostinger catalogue"
+            echo
+            echo "Values below are what \`hostinger_vps\` accepts. Copy the ones you"
+            echo "want into \`infrastructure/terraform/terraform.tfvars\` — see"
+            echo "\`terraform.tfvars.example\`."
+            for o in plans templates data_centers; do
+              echo
+              echo "## $o"
+              echo '```json'
+              terraform output -json "$o" | python3 -m json.tool
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_hostinger_api_key: ${{ secrets.HOSTINGER_API_KEY }}

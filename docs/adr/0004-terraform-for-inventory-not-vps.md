@@ -2,7 +2,25 @@
 
 ## Status
 
-Accepted — 2026-06-26
+**Superseded** by [ADR-0018](./0018-terraform-owns-the-vps.md) — 2026-08-02.
+
+Checked against provider v0.1.22, which exposes `hostinger_dns_record`,
+`hostinger_vps`, `hostinger_vps_post_install_script` and
+`hostinger_vps_ssh_key`. Of the three limitations below:
+
+| Claim | Verdict |
+|---|---|
+| No firewall resource | **Still true** — hence ADR-0006, UFW via Ansible |
+| No DNS record resources | **False** — `hostinger_dns_record` exists |
+| No clean way to import/manage an existing VPS | **False** — `hostinger_vps` imports by id |
+
+Option 2 below ("import the existing VPS and manage everything via Terraform")
+was rejected on those grounds and is now the chosen approach. The premise was
+never re-tested as the provider matured, and every later decision inherited it
+— including the manual SSH-key bootstrap that cost a long recovery session when
+`VPS_SSH_KEY` went stale.
+
+Originally accepted — 2026-06-26
 
 ## Context
 

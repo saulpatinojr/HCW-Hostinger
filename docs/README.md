@@ -48,7 +48,7 @@ Vendor-targeted educational posts about replacing GitHub-hosted runners with a s
 | [0001](./adr/0001-self-hosted-runner-on-hostinger-vps.md) | Self-hosted GitHub Actions runner on a Hostinger VPS |
 | [0002](./adr/0002-github-app-auth-for-runner.md) | GitHub App authentication for the runner |
 | [0003](./adr/0003-docker-based-runner.md) | Runner deployed as a Docker container, not a systemd service |
-| [0004](./adr/0004-terraform-for-inventory-not-vps.md) | Terraform manages the Ansible inventory, not the VPS |
+| [0004](./adr/0004-terraform-for-inventory-not-vps.md) | Terraform manages the Ansible inventory, not the VPS *(superseded by 0018)* |
 | [0005](./adr/0005-tf-state-on-orphan-git-branch.md) | Terraform state stored on an orphan `tf-state` git branch *(superseded for the root module by 0017)* |
 | [0006](./adr/0006-ufw-firewall-via-ansible.md) | Firewall managed by UFW via Ansible, not by the cloud provider |
 | [0007](./adr/0007-os-upgrades-with-reboot-handling.md) | OS dist-upgrade on every provisioning run, with in-play reboot handling |
@@ -62,3 +62,4 @@ Vendor-targeted educational posts about replacing GitHub-hosted runners with a s
 | [0015](./adr/0015-rustdesk-relay-host-networking-and-key-persistence.md) | RustDesk relay on host networking, with an enforced key and a persisted keypair |
 | [0016](./adr/0016-reconcile-roles-with-actual-vps-state.md) | Reconcile the roles with the VPS's actual state (Portainer EE, list-driven runners, k3s) |
 | [0017](./adr/0017-drop-terraform-from-the-provisioning-path.md) | Drop Terraform from the provisioning path — its output was never consumed |
+| [0018](./adr/0018-terraform-owns-the-vps.md) | Terraform owns the VPS and the SSH key installed on it *(supersedes 0004)* |

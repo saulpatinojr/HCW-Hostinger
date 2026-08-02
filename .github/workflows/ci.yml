@@ -44,6 +44,12 @@ jobs:
           terraform validate
         working-directory: infrastructure/terraform/vault-config
 
+      - name: Validate discover module
+        run: |
+          terraform init -backend=false
+          terraform validate
+        working-directory: infrastructure/terraform/discover
+
   ansible:
     name: Ansible
     runs-on: ubuntu-latest
