@@ -1,0 +1,28 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+#
+# The three ids below are account- and region-specific. Do not guess them —
+# run the "Discover Hostinger Options" workflow, which prints the valid values
+# for your account to the job summary.
+#
+# hostinger_api_key is NOT set here. It comes from the HOSTINGER_API_KEY secret
+# via TF_VAR_hostinger_api_key, so the token never lands in a file.
+
+# ── VPS shape ────────────────────────────────────────────────────────────────
+vps_plan           = "REPLACE_FROM_DISCOVER_OUTPUT"
+vps_template_id    = "REPLACE_FROM_DISCOVER_OUTPUT"   # current Ubuntu LTS
+vps_data_center_id = "REPLACE_FROM_DISCOVER_OUTPUT"
+
+# Optional. Omit and Hostinger assigns srvNNNNNN.
+# vps_hostname = "hcw-lab"
+
+# ── Access ───────────────────────────────────────────────────────────────────
+# The PUBLIC key, installed by Hostinger at VPS creation so the box is
+# reachable on first boot. Generate the pair with:
+#
+#   .\scripts\New-VpsSshKey.ps1 -App hcwhostinger -Purpose ci
+#
+# then put the base64 of the PRIVATE half in the VPS_SSH_KEY secret.
+ssh_key_name   = "hcwhostinger-ci"
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... hcwhostinger-ci-key"
+
+ssh_user = "root"

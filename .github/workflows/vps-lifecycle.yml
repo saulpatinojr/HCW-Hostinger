@@ -1,0 +1,150 @@
+name: VPS Lifecycle
+
+# Terraform ownership of the VPS itself — the machine, and the SSH key
+# Hostinger installs on it at creation.
+#
+# Deliberately separate from "Provision VPS", which is Ansible-only and runs
+# often. This one touches a real, billable server and should run rarely.
+#
+# THERE IS NO DESTROY ACTION. Deleting the VPS is not something a dropdown
+# should be able to do. `prevent_destroy` on the resource is the second lock;
+# removing a server means editing code and knowing exactly why.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to do"
+        required: true
+        default: plan
+        type: choice
+        options: [plan, apply, import]
+      import_vps_id:
+        description: "For `import` only: existing Hostinger VPS id to adopt (e.g. 939861). Terraform takes over managing it instead of creating a new one."
+        required: false
+        default: ""
+        type: string
+
+# Never run two of these at once. Concurrent applies against one account can
+# create duplicate servers, and the loser's state is lost.
+concurrency:
+  group: vps-lifecycle
+  cancel-in-progress: false
+
+env:
+  TF_DIR: infrastructure/terraform
+  TF_STATE_BRANCH: tf-state
+  TF_STATE_PATH: vps/terraform.tfstate
+
+jobs:
+  lifecycle:
+    name: VPS ${{ inputs.action }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Fetch BEFORE testing for the ref: actions/checkout only fetches the
+      # triggering ref, so origin/tf-state does not exist locally until we ask
+      # for it. Getting this backwards is what silently disabled state restore
+      # for the whole life of the previous setup.
+      - name: Restore Terraform state
+        run: |
+          git fetch origin "$TF_STATE_BRANCH" 2>/dev/null || true
+          if git cat-file -e "origin/$TF_STATE_BRANCH:$TF_STATE_PATH" 2>/dev/null; then
+            git show "origin/$TF_STATE_BRANCH:$TF_STATE_PATH" > "$TF_DIR/terraform.tfstate"
+            echo "State restored."
+          else
+            echo "No existing state. If a VPS already exists, use action=import — an apply would build a SECOND one."
+          fi
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init
+        working-directory: ${{ env.TF_DIR }}
+
+      - name: Import the existing VPS
+        if: inputs.action == 'import'
+        run: |
+          if [ -z "${{ inputs.import_vps_id }}" ]; then
+            echo "import_vps_id is required for action=import." >&2
+            exit 1
+          fi
+          terraform import hostinger_vps.main "${{ inputs.import_vps_id }}"
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_hostinger_api_key: ${{ secrets.HOSTINGER_API_KEY }}
+
+      - name: Terraform plan
+        if: inputs.action != 'apply'
+        run: terraform plan -no-color
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_hostinger_api_key: ${{ secrets.HOSTINGER_API_KEY }}
+
+      - name: Terraform apply
+        if: inputs.action == 'apply'
+        run: terraform apply -auto-approve -no-color
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_hostinger_api_key: ${{ secrets.HOSTINGER_API_KEY }}
+
+      # The IP is the handoff to everything else. VPS_SSH_HOST must match it or
+      # every later workflow fails at the SSH handshake.
+      - name: Report VPS details
+        if: inputs.action != 'plan'
+        run: |
+          {
+            echo "# VPS"
+            echo
+            echo '| Output | Value |'
+            echo '|---|---|'
+            for o in vps_id vps_ip vps_ipv6 vps_hostname vps_status ssh_key_id; do
+              echo "| \`$o\` | \`$(terraform output -raw "$o" 2>/dev/null || echo 'n/a')\` |"
+            done
+            echo
+            echo "> Set the **\`VPS_SSH_HOST\`** secret to \`vps_ip\` above before running"
+            echo "> Provision VPS or VPS Diagnostics."
+          } >> "$GITHUB_STEP_SUMMARY"
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_hostinger_api_key: ${{ secrets.HOSTINGER_API_KEY }}
+
+      # State now records that a real server exists. Losing it means the next
+      # apply builds a duplicate, so this step must not be skipped on failure
+      # of a later one — it is the last step for that reason.
+      - name: Commit Terraform state
+        if: always() && inputs.action != 'plan'
+        run: |
+          if [ ! -f "$TF_DIR/terraform.tfstate" ]; then
+            echo "No state file to commit."
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          ORIG_BRANCH=$(git symbolic-ref --short HEAD)
+          cp "$TF_DIR/terraform.tfstate" /tmp/terraform.tfstate
+
+          git fetch origin "$TF_STATE_BRANCH" 2>/dev/null || true
+          if git rev-parse --verify "origin/$TF_STATE_BRANCH" &>/dev/null; then
+            git checkout "$TF_STATE_BRANCH"
+          else
+            git checkout --orphan "$TF_STATE_BRANCH"
+            git rm -rf . --quiet
+          fi
+
+          mkdir -p "$(dirname "$TF_STATE_PATH")"
+          cp /tmp/terraform.tfstate "$TF_STATE_PATH"
+          git add "$TF_STATE_PATH"
+          git diff --cached --quiet || git commit -m "chore: update VPS terraform state [skip ci]"
+          git push origin "$TF_STATE_BRANCH"
+          git checkout "$ORIG_BRANCH"
