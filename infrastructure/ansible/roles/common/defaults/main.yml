@@ -1,0 +1,21 @@
+---
+# ── SSH authorised keys ──────────────────────────────────────────────────────
+# Declarative, so the key set is reproducible instead of appended to by hand.
+# The VPS previously accumulated three keys, one of which had been appended
+# without a trailing newline and so was glued onto the previous entry's comment
+# field. Managing this file removes that whole class of mistake.
+#
+# Public keys only — never a private key. Add the literal one-line
+# "ssh-ed25519 AAAA... comment" value.
+ssh_authorized_user: root
+ssh_authorized_keys: []
+
+# Set true ONLY after confirming the keys above can log in. When true, every
+# key not listed is removed from authorized_keys — a wrong list locks you out
+# of SSH, and recovery is via the Hostinger browser console.
+ssh_authorized_keys_exclusive: false
+
+ufw_allowed_ports:
+  - { port: "22", proto: tcp }
+  - { port: "80", proto: tcp }
+  - { port: "443", proto: tcp }

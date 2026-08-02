@@ -1,202 +1,185 @@
-# Deploy to Hostinger VPS GitHub Action
+# HCW-Hostinger
 
-[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Deploy%20to%20Hostinger%20VPS-purple)](https://github.com/marketplace/actions/deploy-on-hostinger-vps)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Infrastructure-as-code for a single Hostinger VPS. Terraform generates the
+Ansible inventory, Ansible provisions the host, and GitHub Actions workflows
+drive both. The goal is that **any component can be rebuilt from this repo
+without hand-editing the server.**
 
-Deploy your Docker applications to Hostinger VPS with ease using GitHub Actions.
+> Looking for how to deploy *your own* repo onto this VPS?
+> See **[Deploying to the VPS](./docs/wiki/Deploying-to-the-VPS.md)**.
 
-## Features
+## What runs on the VPS
 
-- 🚀 **Easy Deployment**: Deploy Docker applications with a simple workflow configuration
-- 🔒 **Private Repository Support**: Works with both public and private GitHub repositories
-- 🔧 **Environment Variables**: Pass environment variables to your Docker containers
+| Component | Managed by | Exposure | Tag |
+|---|---|---|---|
+| Base OS, UFW, SSH keys, hardening, fail2ban | `roles/common` | 22/tcp | `common` |
+| Docker Engine + Compose v2 | `roles/docker` | — | `docker` |
+| Portainer **EE** 2.39.4 | `roles/portainer` | `127.0.0.1:9443` (SSH tunnel) | `portainer` |
+| GitHub Actions runners (one per repo) | `roles/github_runner` | — | `runner` |
+| **k3d** — the backend lab | `roles/kubernetes` | `127.0.0.1:8081` (SSH tunnel) | `k3d` |
+| kind / kubectl / helm | `roles/kubernetes` | — | `k8s_tools` |
+| RustDesk relay (hbbs + hbbr) | `roles/rustdesk` | 21115-21117/tcp, 21116/udp | `rustdesk` |
+| HashiCorp Vault | `roles/vault` | `127.0.0.1:8200` (SSH tunnel) | *(separate playbook)* |
+| FinOps Dependabot runner (native) | `roles/github_runner_native` | — | *(separate playbook)* |
+| Application stack | root `docker-compose.yml` | 80/tcp | *(deploy workflow)* |
 
-## Prerequisites
+**k3s runs the backend lab on this box**, with live workloads. The role adopts
+it: it installs k3s only when absent and otherwise just asserts the service is
+up. It never upgrades or removes it — see ADR-0016. kind and k3d are a separate
+concern, for disposable clusters inside CI jobs.
 
-- A Hostinger VPS with Docker installed
-- Hostinger API key (available in your Hostinger dashboard)
-- A `docker-compose.yml` file in your repository
-- For private repositories - [SSH Deploy key](https://www.hostinger.com/support/how-to-deploy-from-private-github-repository-on-hostinger-docker-manager/)
+### Adding a runner for another repo
 
-## Usage
+Runners are a list, so every one gets identical configuration. Generate a
+correctly-formed entry with
+[`scripts/New-VpsRunner.ps1`](./scripts/New-VpsRunner.ps1) — it prompts for the
+parts and prints the YAML — then add it to `github_runners` in
+`roles/github_runner/defaults/main.yml`, install the GitHub App on that repo,
+and run `Provision VPS` with `ansible_tags: runner`.
 
-### Basic Usage (Public Repository)
+Naming convention is `<app>-<purpose>-runner` (e.g. `myapi-ci-runner`), used
+verbatim as the compose project and the container name so `docker ps` is
+self-explanatory. The role validates it and fails the play on a malformed name.
+`github_runners` ships **empty** — fill in your own. Full walkthrough in
+[Deploying to the VPS](./docs/wiki/Deploying-to-the-VPS.md).
 
-```yaml
-name: Deploy to Hostinger
+## Layout
 
-on:
-  push:
-    branches: [ main ]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      
-      - name: Deploy to Hostinger
-        uses: hostinger/deploy-on-vps@v2
-        with:
-          api-key: ${{ secrets.HOSTINGER_API_KEY }}
-          virtual-machine: ${{ vars.HOSTINGER_VM_ID }}
+```
+.github/workflows/     provision, deploy, diagnostics, vault
+infrastructure/
+  terraform/           generates the Ansible inventory (+ vault-config root)
+  ansible/
+    site.yml           main playbook — all roles, all tagged
+    vault.yml          Vault host lifecycle
+    deploy-finops-runner.yml
+    roles/
+docs/
+  adr/                 architecture decision records
+  blog/                write-ups
+  wiki/                pages published to the GitHub wiki
+scripts/setup-runner.sh  manual runner bootstrap (pre-Ansible fallback)
+docker-compose.yml     the application stack deployed to the VPS
+action.yaml            vendored Hostinger deploy action (see docs/)
 ```
 
-### Advanced Usage (environment variables, custom docker compose path)
+## Workflows
 
-```yaml
-name: Deploy to Hostinger
+| Workflow | Trigger | Does |
+|---|---|---|
+| **Provision VPS** | manual | `terraform apply` → `ansible-playbook site.yml` |
+| **Multi-Environment Deploy** | push to `main`/`staging` | `docker compose pull && up -d` on the runner |
+| **VPS Diagnostics** | manual | read-only health report over SSH |
+| **Vault Provision** | manual | installs/removes the Vault service |
+| **Vault Config** | manual | Terraform-managed Vault policies and auth |
+| **CI** | pull request | Terraform fmt/validate + Ansible syntax check |
 
-on:
-  push:
-    branches: [ main, production ]
+### Redeploying a single component
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      
-      - name: Deploy to Hostinger
-        uses: hostinger/deploy-on-vps@v2
-        with:
-          api-key: ${{ secrets.HOSTINGER_API_KEY }}
-          virtual-machine: ${{ vars.HOSTINGER_VM_ID }}
-          project-name: my-awesome-app
-          docker-compose-path: docker/docker-compose.yml
-          environment-variables: |
-            NODE_ENV=production
-            API_URL=https://api.example.com
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
+`Provision VPS` takes an `ansible_tags` input. Leave it blank to run everything;
+set it to redeploy one piece:
+
+| Want to rebuild | `ansible_tags` |
+|---|---|
+| Just the RustDesk relay | `rustdesk` |
+| Portainer and the runner | `portainer,runner` |
+| Everything except OS upgrades | `docker,portainer,runner,kubernetes,rustdesk` |
+
+This matters: the `common` role runs a `dist-upgrade` and **reboots the VPS** if
+the kernel changed (ADR-0007). Tag-limiting avoids an unplanned reboot when you
+only meant to bounce one service.
+
+Locally, the same thing:
+
+```bash
+cd infrastructure/ansible
+ansible-playbook site.yml --tags rustdesk
 ```
 
-## Inputs
+## Required secrets and variables
 
-| Input                   | Description                                                                | Required | Default                    |
-|-------------------------|----------------------------------------------------------------------------|----------|----------------------------|
-| `api-key`               | Hostinger API key for authentication                                       | Yes      | -                          |
-| `virtual-machine`       | Virtual machine ID where the application will be deployed                  | Yes      | -                          |
-| `project-name`          | Name of the project for identification                                     | No       | `${{ github.repository }}` |
-| `environment-variables` | Environment variables (KEY=value format, newline separated)                | No       | -                          |
-| `docker-compose-path`   | Path to docker-compose.yml file (will be detected automatically otherwise) | No       | -                          |
+Nothing sensitive is committed. Placeholders live in
+[`secrets.example.env`](./secrets.example.env) — copy it, fill it in, and use
+the `gh` snippet at the bottom of that file to push them.
 
-## Setting up Secrets
+**Repository secrets**
 
-1. **Get your Hostinger API Key:**
-    - Log in to your [Hostinger account](https://hpanel.hostinger.com/)
-    - Navigate to API [Settings](https://hpanel.hostinger.com/profile/api)
-    - Generate or copy your API key
+| Secret | Used by | Notes |
+|---|---|---|
+| `HOSTINGER_API_KEY` | Provision | hPanel → Profile → API |
+| `VPS_SSH_HOST` | Provision, Diagnostics, Vault | IP or hostname |
+| `VPS_SSH_USERNAME` | Provision, Diagnostics, Vault | usually `root` |
+| `VPS_SSH_KEY` | Provision, Diagnostics, Vault | **base64-encoded** private key |
+| `GH_APP_ID` | Provision | GitHub App backing the runner |
+| `GH_APP_INSTALLATION_ID` | Provision | |
+| `GH_APP_PRIVATE_KEY` | Provision | **base64-encoded** PEM |
+| `VAULT_BOOTSTRAP_TOKEN` | Vault Config | first apply only, then delete |
+| `VAULT_CI_ROLE_ID` | Vault Config | AppRole, steady state |
+| `VAULT_CI_SECRET_ID` | Vault Config | AppRole, steady state |
 
-2. **Get your Virtual Machine ID:**
-    - Go to your VPS overview dashboard
-    - Find the VM ID:
-      - If your VM has default hostname, eg.: srv123456.hstgr.cloud, then the VM ID is 123456
-      - If your VM has custom hostname, you can find the ID from the browser URL: https://hpanel.hostinger.com/vps/123456/overview
+**Repository variables**
 
-3. **Add secrets to GitHub:**
-    - Go to your repository → Settings → Secrets and variables → Actions
-    - Add the following secrets:
-      - `HOSTINGER_API_KEY`: Your Hostinger API key
-    - Add the following variables:
-      - `HOSTINGER_VM_ID`: Your Hostinger VM ID
+| Variable | Used by | Notes |
+|---|---|---|
+| `HOSTINGER_VM_ID` | Provision | numeric ID from the hPanel URL |
+| `VAULT_APPROLE_PATH` | Vault Config | optional, defaults to `approle` |
 
-4. **For private repositories:**
-    - Generate an SSH key in your VPS (if not yet generated)
-    - Add your SSH deployment key to private repository by visiting url `https://github.com/<owner name>/<your repo name>/settings/keys`
-    - You can find more information how to do that in [Hostinger documentation](https://www.hostinger.com/support/how-to-deploy-from-private-github-repository-on-hostinger-docker-manager/)
+Both SSH and App keys are base64 because the workflows `base64 -d` them:
 
-## Environment Variables
-
-You can pass environment variables in multiple formats:
-
-```yaml
-environment-variables: |
-  NODE_ENV=production
-  PORT=3000
-  DEBUG=false
-  API_KEY=${{ secrets.API_KEY }}
+```bash
+base64 -w0 < ~/.ssh/myapi-ci-key         # → VPS_SSH_KEY
+base64 -w0 < github-app.private-key.pem # → GH_APP_PRIVATE_KEY
 ```
 
-## Docker Compose File
+On Windows, [`scripts/New-VpsSshKey.ps1`](./scripts/New-VpsSshKey.ps1) does the
+whole thing. Run it with no arguments and it prompts for the naming parts:
 
-Your repository should contain a `docker-compose.y(a)ml` / `compose.y(a)ml` file. Example:
-
-```yaml
-services:
-  web:
-    build: .
-    ports:
-      - "80:3000"
-    environment:
-      - NODE_ENV=${NODE_ENV:-development}
-      - PORT=${PORT:-3000}
-    restart: unless-stopped
+```powershell
+.\scripts\New-VpsSshKey.ps1
 ```
 
-## Examples
+It creates `<app>-<purpose>-key`, proves the key has no passphrase, fixes the
+Windows ACL, and prints the authorise + encode steps. Add
+`-SetGitHubSecret -Repo owner/repo` to push `VPS_SSH_KEY` directly, or
+`-ArchiveExisting` to move off-convention keys into `~/.ssh/archive/` first
+(nothing is deleted).
 
-### Deploy on Tag Creation
+Authorised keys are managed declaratively — add the public key to
+`ssh_authorized_keys` in `roles/common/defaults/main.yml` so it survives
+re-provisioning instead of being appended to the box by hand.
 
-```yaml
-name: Deploy on Tag
+## First-time bring-up
 
-on:
-  push:
-    tags:
-      - 'v*'
+1. Create the VPS in hPanel, note the ID and IP.
+2. Add an SSH public key to the VPS and load the secrets above.
+3. Run **Provision VPS** with `tf_action=apply`, `ansible_tags` blank.
+4. Run **VPS Diagnostics** to confirm the state of the box.
+5. For Vault, follow [VAULT-WORKFLOW-RUNBOOK.md](./VAULT-WORKFLOW-RUNBOOK.md) —
+   `vault operator init` and unsealing stay manual by design.
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      
-      - name: Deploy to Hostinger
-        uses: hostinger/deploy-on-vps@v2
-        with:
-          api-key: ${{ secrets.HOSTINGER_API_KEY }}
-          virtual-machine: ${{ vars.HOSTINGER_VM_ID }}
-          project-name: my-app-${{ github.ref_name }}
-```
+## Things to know before you touch this
 
-### Multi-Environment Deployment
+- **Vault has never been initialised.** As of 2026-08-02 the service reports
+  `{"initialized": false, "sealed": true}` — it has been up for three weeks
+  doing nothing. `Vault Config` cannot work until someone completes step 4 of
+  the [runbook](./VAULT-WORKFLOW-RUNBOOK.md) (`vault operator init`). There is
+  also no auto-unseal, so a reboot re-seals it.
+- **The runner is privileged and mounts the Docker socket** (ADR-0013). A job on
+  this runner is effectively root on the host.
+- **Terraform state lives on the orphan `tf-state` branch** (ADR-0005), not in a
+  real backend. `Provision VPS` serialises itself to avoid clobbering it.
+- **Port 80 is the application stack.** Check the table above before binding a
+  new port from another repo.
 
-```yaml
-name: Multi-Environment Deploy
+## Documentation
 
-on:
-  push:
-    branches: [ main, staging ]
+- [Docs index](./docs/README.md) — ADRs and write-ups
+- [Deploying to the VPS](./docs/wiki/Deploying-to-the-VPS.md) — for other repos
+- [Vault runbook](./VAULT-WORKFLOW-RUNBOOK.md)
+- [FinOps runner](./docs/finops-dependabot-runner.md)
+- [Vendored Hostinger deploy action](./docs/hostinger-deploy-action.md)
+- [TODO](./TODO.md)
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      
-      - name: Set environment
-        id: env
-        run: |
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "vm_id=${{ vars.PROD_VM_ID }}" >> $GITHUB_OUTPUT
-            echo "env_vars=NODE_ENV=production" >> $GITHUB_OUTPUT
-          else
-            echo "vm_id=${{ vars.STAGING_VM_ID }}" >> $GITHUB_OUTPUT
-            echo "env_vars=NODE_ENV=staging" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Deploy to Hostinger
-        uses: hostinger/deploy-on-vps@v2
-        with:
-          api-key: ${{ secrets.HOSTINGER_API_KEY }}
-          virtual-machine: ${{ steps.env.outputs.vm_id }}
-          environment-variables: ${{ steps.env.outputs.env_vars }}
-```
+## License
 
-## Support
-
-For issues and feature requests, please [create an issue](https://github.com/hostinger/deploy-to-vps/issues) on GitHub.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+MIT — see [LICENSE](./LICENSE).

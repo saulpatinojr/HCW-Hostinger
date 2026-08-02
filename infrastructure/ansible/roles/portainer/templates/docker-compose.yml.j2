@@ -1,12 +1,13 @@
 services:
   portainer:
-    image: portainer/portainer-ce:latest
+    image: {{ portainer_image }}
     restart: unless-stopped
     ports:
-      - "127.0.0.1:9443:9443"
+      - "{{ portainer_bind_address }}:{{ portainer_port }}:9443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
 
 volumes:
   portainer_data:
+    name: portainer_data

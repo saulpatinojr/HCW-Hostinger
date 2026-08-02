@@ -1,0 +1,12 @@
+---
+- name: Verify hbbs container
+  community.docker.docker_container_info:
+    name: rustdesk-hbbs-1
+  register: _hbbs_info
+  failed_when: not _hbbs_info.exists or _hbbs_info.container['State']['Status'] != 'running'
+
+- name: Verify hbbr container
+  community.docker.docker_container_info:
+    name: rustdesk-hbbr-1
+  register: _hbbr_info
+  failed_when: not _hbbr_info.exists or _hbbr_info.container['State']['Status'] != 'running'

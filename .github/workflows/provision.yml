@@ -9,6 +9,18 @@ on:
         default: apply
         type: choice
         options: [plan, apply, destroy]
+      ansible_tags:
+        description: "Limit provisioning to these Ansible tags (comma-separated; blank = every role). e.g. rustdesk, portainer, runner"
+        required: false
+        default: ""
+        type: string
+
+# Serialise applies: two concurrent runs would race each other pushing
+# terraform.tfstate to the tf-state branch, and the loser's state is lost.
+# Queue rather than cancel — a cancelled apply can leave the VPS half-built.
+concurrency:
+  group: provision-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   TF_DIR: infrastructure/terraform
@@ -30,9 +42,14 @@ jobs:
 
       - name: Restore Terraform state
         run: |
-          # Use cat-file -e to check existence without printing state content to logs
+          # actions/checkout only fetches the ref that triggered the run, so
+          # origin/tf-state does not exist locally until we fetch it. Testing
+          # for the ref before fetching meant this check always failed and the
+          # state was never restored — every apply started from empty state.
+          # (Symptom: every commit on tf-state has "serial": 1.)
+          git fetch origin tf-state 2>/dev/null || true
+          # cat-file -e checks existence without printing state content to logs
           if git cat-file -e origin/tf-state:terraform.tfstate 2>/dev/null; then
-            git fetch origin tf-state
             git show origin/tf-state:terraform.tfstate > $TF_DIR/terraform.tfstate
           fi
 
@@ -139,11 +156,19 @@ jobs:
         # Playbook is fully idempotent — safe to re-run at any point.
         # If a dist-upgrade requires a kernel reboot, Ansible reboots the VPS
         # and waits up to 5 minutes for SSH to recover before continuing.
+        env:
+          ANSIBLE_TAGS: ${{ inputs.ansible_tags }}
         run: |
+          TAG_ARGS=()
+          if [ -n "$ANSIBLE_TAGS" ]; then
+            TAG_ARGS=(--tags "$ANSIBLE_TAGS")
+            echo "Limiting provisioning to tags: $ANSIBLE_TAGS"
+          fi
+
           ansible-playbook site.yml \
             --private-key /tmp/vps_key \
+            "${TAG_ARGS[@]}" \
             -e "github_app_id=${{ secrets.GH_APP_ID }}" \
             -e "github_app_installation_id=${{ secrets.GH_APP_INSTALLATION_ID }}" \
-            -e "github_app_private_key=${{ secrets.GH_APP_PRIVATE_KEY }}" \
-            -e "github_repo=${{ github.repository }}"
+            -e "github_app_private_key=${{ secrets.GH_APP_PRIVATE_KEY }}"
         working-directory: ${{ env.ANSIBLE_DIR }}

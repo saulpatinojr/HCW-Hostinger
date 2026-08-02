@@ -1,10 +1,4 @@
 ---
-- name: Verify runner container
-  community.docker.docker_compose_v2:
-    project_src: /opt/github-runner
-    state: present
-  register: runner_status
-
-- name: Show runner status
-  ansible.builtin.debug:
-    msg: "Runner container state: {{ runner_status.services.runner.State.Status | default('unknown') }}"
+# No handlers. Verification runs inline in tasks/main.yml because the role now
+# manages a list of runners and each one must be checked by its own container
+# name — a notified handler cannot see the loop variable that names it.

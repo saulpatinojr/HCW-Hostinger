@@ -4,9 +4,25 @@
   become: true
   gather_facts: true
 
+  # Every role carries a tag so a single component can be redeployed without
+  # running the whole playbook. `common` in particular does a dist-upgrade and
+  # will reboot the VPS if the kernel changed, which you rarely want when you
+  # only meant to bounce one service.
+  #
+  #   ansible-playbook site.yml --tags rustdesk
+  #   ansible-playbook site.yml --tags portainer,runner
+  #
+  # Or via the Provision VPS workflow's `ansible_tags` input.
   roles:
-    - common          # system updates, UFW, SSH hardening
-    - docker          # Docker Engine + Compose plugin
-    - portainer       # Portainer CE for Docker visibility (access via SSH tunnel)
-    - github_runner   # runner as Docker container via myoung34/github-runner
-    - kubernetes      # kind, k3d, kubectl, helm for training
+    - role: common          # system updates, UFW, SSH hardening
+      tags: [common, base]
+    - role: docker          # Docker Engine + Compose plugin
+      tags: [docker, base]
+    - role: portainer       # Portainer CE for Docker visibility (SSH tunnel)
+      tags: [portainer]
+    - role: github_runner   # runner as Docker container via myoung34/github-runner
+      tags: [runner, github_runner]
+    - role: kubernetes      # kind, k3d, kubectl, helm for training
+      tags: [kubernetes, k8s]
+    - role: rustdesk        # RustDesk Server OSS (hbbs + hbbr) remote-desktop relay
+      tags: [rustdesk]

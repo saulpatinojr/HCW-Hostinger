@@ -1,5 +1,15 @@
 # Documentation
 
+## Guides
+
+| Page | For |
+|---|---|
+| [Deploying to the VPS](./wiki/Deploying-to-the-VPS.md) | Other repos that need to deploy onto this VPS |
+| [FinOps Dependabot runner](./finops-dependabot-runner.md) | The dedicated native runner |
+| [Vendored Hostinger deploy action](./hostinger-deploy-action.md) | Upstream `action.yaml` usage |
+
+Pages under `wiki/` are mirrored to the [GitHub wiki](https://github.com/saulpatinojr/HCW-Hostinger/wiki).
+
 ## Blog posts
 
 Vendor-targeted educational posts about replacing GitHub-hosted runners with a self-hosted runner on a $8/mo Hostinger VPS. Each angles the same project for a different developer audience.
@@ -48,3 +58,5 @@ Vendor-targeted educational posts about replacing GitHub-hosted runners with a s
 | [0012](./adr/0012-docker-compose-v2-plugin.md) | Docker Compose V2 plugin, not standalone docker-compose v1 |
 | [0013](./adr/0013-docker-socket-security-model.md) | Docker socket mounting — accepted risk with documented upgrade path |
 | [0014](./adr/0014-named-volumes-and-restart-policy.md) | Named volumes for persistent data; `restart: unless-stopped` policy |
+| [0015](./adr/0015-rustdesk-relay-host-networking-and-key-persistence.md) | RustDesk relay on host networking, with an enforced key and a persisted keypair |
+| [0016](./adr/0016-reconcile-roles-with-actual-vps-state.md) | Reconcile the roles with the VPS's actual state (Portainer EE, list-driven runners, k3s) |

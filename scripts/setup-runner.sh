@@ -2,6 +2,13 @@
 # Installs and registers a GitHub Actions self-hosted runner on a Hostinger VPS.
 # Run this script once on the VPS as root (or via sudo).
 #
+# NOTE: this is the manual bootstrap path, kept for a VPS that has no Ansible
+# access yet. The maintained paths are:
+#   - containerised runner: infrastructure/ansible/roles/github_runner
+#   - native runner:        infrastructure/ansible/roles/github_runner_native
+# Unlike github_runner_native, this script does not verify a checksum on the
+# downloaded runner tarball. Prefer the Ansible roles where you can.
+#
 # Usage:
 #   curl -o setup-runner.sh https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/setup-runner.sh
 #   chmod +x setup-runner.sh
@@ -94,7 +101,6 @@ info "Installing systemd service..."
 "${RUNNER_DIR}/svc.sh" start
 
 # ── Verify ────────────────────────────────────────────────────────────────────
-SERVICE_NAME="actions.runner.$(basename "$REPO_URL").${RUNNER_NAME}.service" 2>/dev/null || true
 sleep 2
 
 if systemctl is-active --quiet "actions.runner.*" 2>/dev/null || \

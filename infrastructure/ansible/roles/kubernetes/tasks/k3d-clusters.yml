@@ -1,0 +1,75 @@
+---
+# Cluster lifecycle. Split out from the tool installs so `--tags k3d` reads as
+# "reconcile the lab" rather than "download some binaries".
+
+- name: List existing k3d clusters
+  ansible.builtin.command:
+    cmd: k3d cluster list -o json
+  register: _k3d_list
+  changed_when: false
+  failed_when: false
+
+# `k3d cluster list -o json` prints [] when there are none, but returns
+# non-zero with empty stdout if the Docker socket is unreachable — treat both
+# as "nothing exists" rather than letting from_json blow up on an empty string.
+- name: Record which clusters already exist
+  ansible.builtin.set_fact:
+    _k3d_existing: >-
+      {{ (_k3d_list.stdout | from_json | map(attribute='name') | list)
+         if (_k3d_list.rc == 0 and (_k3d_list.stdout | default('') | trim | length) > 0)
+         else [] }}
+
+- name: Report current k3d clusters
+  ansible.builtin.debug:
+    msg: "existing k3d clusters: {{ _k3d_existing | default([]) }}"
+
+# Creating is the only mutating operation here. An existing cluster is left
+# alone — k3d has no in-place reconfigure, so "converging" a live cluster would
+# mean deleting and recreating it, which is not something a routine
+# provisioning run should decide to do.
+- name: Create missing k3d clusters
+  ansible.builtin.command:
+    argv: "{{ ['k3d', 'cluster', 'create', item.name,
+               '--servers', item.servers | default(1) | string,
+               '--agents', item.agents | default(0) | string]
+              + (item.ports | default([]) | map('regex_replace', '^', '--port=') | list)
+              + ['--wait'] }}"
+  loop: "{{ k3d_clusters }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name not in (_k3d_existing | default([]))
+  register: _k3d_created
+  changed_when: _k3d_created is not skipped
+
+- name: Ensure declared clusters are started
+  ansible.builtin.command:
+    cmd: "k3d cluster start {{ item.name }}"
+  loop: "{{ k3d_clusters }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: _k3d_start
+  changed_when: "'is already running' not in (_k3d_start.stderr | default(''))"
+  failed_when: false
+
+# Explicit opt-in only. Removing a name from k3d_clusters does not delete
+# anything — losing a cluster because a list entry was edited would be a
+# genuinely bad surprise.
+- name: Delete k3d clusters explicitly marked absent
+  ansible.builtin.command:
+    cmd: "k3d cluster delete {{ item }}"
+  loop: "{{ k3d_clusters_absent }}"
+  when: item in (_k3d_existing | default([]))
+
+- name: Read cluster node status
+  ansible.builtin.command:
+    cmd: "k3d node list -o json"
+  register: _k3d_nodes
+  changed_when: false
+  failed_when: false
+
+- name: Report k3d lab state
+  ansible.builtin.debug:
+    msg: >-
+      {{ (_k3d_nodes.stdout | from_json | map(attribute='name') | list)
+         if (_k3d_nodes.rc == 0 and (_k3d_nodes.stdout | default('') | trim | length) > 0)
+         else 'no k3d nodes' }}

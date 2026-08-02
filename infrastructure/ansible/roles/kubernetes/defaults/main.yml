@@ -1,4 +1,45 @@
 ---
+# ── Backend lab: k3d ─────────────────────────────────────────────────────────
+# k3d runs k3s inside Docker containers. Clusters are declared here and created
+# idempotently, so the lab comes back from a bare VPS with one tagged run
+# rather than being built by hand.
+#
+# Workloads inside a cluster are NOT managed here — deploy those from whichever
+# repo owns them. This role gets you a running, reachable cluster.
+k3d_manage: true
+k3d_version: "5.9.0"
+
+# Ports bind to loopback by default, matching Portainer and Vault: reach the
+# ingress over an SSH tunnel rather than opening a hole in UFW.
+#
+#   ssh -L 8081:127.0.0.1:8081 <user>@<vps-host> -N
+#
+# To publish one properly, add a matching UFW rule in this role — not by
+# running `ufw allow` on the box, which the repo would not know about.
+k3d_clusters:
+  - name: backend-lab
+    servers: 1
+    agents: 2
+    ports:
+      - "127.0.0.1:8081:80@loadbalancer"
+
+# Deleting a cluster is deliberate and destructive, so it is never inferred
+# from a cluster disappearing out of k3d_clusters. Name it here explicitly.
+k3d_clusters_absent: []
+
+# ── Host-level k3s ───────────────────────────────────────────────────────────
+# Off. The VPS ran a host-level k3s install; the lab is moving to k3d, which is
+# easier to create and destroy per-environment. Left in place because turning
+# this on is the right answer if the lab ever needs to survive Docker itself
+# going down. Adopt-only when enabled: installs when absent, otherwise just
+# asserts the service is up. Never upgrades, never uninstalls. See ADR-0016.
+k3s_manage: false
+k3s_version: "v1.36.2+k3s1"
+k3s_service_name: k3s
+k3s_install_args: "--write-kubeconfig-mode 644"
+
+# ── Cluster tooling ──────────────────────────────────────────────────────────
+k8s_tools_manage: true
 kind_version: "0.24.0"
-kubectl_version: "stable"   # resolves to latest stable via dl.k8s.io
-k3d_version: "5.7.4"
+helm_version: "3.21.3"
+kubectl_version: "stable"   # resolves via dl.k8s.io/release/stable.txt

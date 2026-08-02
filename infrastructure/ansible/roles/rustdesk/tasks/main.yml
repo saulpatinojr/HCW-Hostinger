@@ -1,0 +1,76 @@
+---
+- name: Create rustdesk directory
+  ansible.builtin.file:
+    path: "{{ rustdesk_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write rustdesk docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ rustdesk_dir }}/docker-compose.yml"
+    mode: "0644"
+
+# UFW rules live in this role rather than in `common` so the role owns its own
+# firewall surface: removing the role removes its holes with it.
+- name: Allow RustDesk TCP ports through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: "{{ rustdesk_ports_tcp }}"
+
+- name: Allow RustDesk UDP ports through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: udp
+  loop: "{{ rustdesk_ports_udp }}"
+
+# Adding the rule when the web client is on, withdrawing it when off, so
+# flipping the flag back to false actually closes the ports again.
+- name: Manage RustDesk web client ports in UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    delete: "{{ not rustdesk_websocket_enabled }}"
+  loop: "{{ rustdesk_websocket_ports_tcp }}"
+
+- name: Pull RustDesk server image
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ rustdesk_dir }}"
+
+- name: Start (or recreate if config changed) RustDesk containers
+  community.docker.docker_compose_v2:
+    project_src: "{{ rustdesk_dir }}"
+    state: present
+    recreate: auto
+  notify:
+    - Verify hbbs container
+    - Verify hbbr container
+
+- name: Locate the RustDesk data volume
+  community.docker.docker_volume_info:
+    name: "{{ rustdesk_volume }}"
+  register: _rustdesk_volume_info
+
+# hbbs generates the keypair on first start, so the file may not exist for a
+# second or two after the container comes up.
+- name: Read the RustDesk public key
+  ansible.builtin.slurp:
+    src: "{{ _rustdesk_volume_info.volume.Mountpoint }}/id_ed25519.pub"
+  register: _rustdesk_pubkey
+  retries: 5
+  delay: 3
+  until: _rustdesk_pubkey is succeeded
+
+- name: Show the RustDesk public key
+  ansible.builtin.debug:
+    msg:
+      - "RustDesk public key — clients must be configured with this:"
+      - "{{ _rustdesk_pubkey.content | b64decode | trim }}"
+      - "Back up {{ _rustdesk_volume_info.volume.Mountpoint }} — losing the"
+      - "keypair re-keys every client."

@@ -1,2 +1,12 @@
 ---
 portainer_dir: /opt/portainer
+
+# Enterprise Edition, pinned. The VPS has run portainer-ee:2.39.4 since 2026-06,
+# but this role declared portainer-ce:latest — so an apply would have pulled CE
+# over the EE install. EE keeps its licence state in portainer_data; swapping
+# editions underneath it is not a reversible operation. See ADR-0016.
+portainer_image: portainer/portainer-ee:2.39.4
+
+# Loopback only; reach it over an SSH tunnel (ADR-0010).
+portainer_bind_address: "127.0.0.1"
+portainer_port: 9443

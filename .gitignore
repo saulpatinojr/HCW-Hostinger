@@ -1,0 +1,12 @@
+# Filled-in copies of secrets.example.env
+.secrets.env
+*.secrets.env
+.env
+
+# SSH keys and PEMs that wander into the working tree
+*.pem
+id_ed25519
+id_rsa
+
+# Ansible (inventory/hosts.yml is covered by inventory/.gitignore)
+*.retry
