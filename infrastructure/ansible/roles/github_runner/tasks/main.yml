@@ -1,12 +1,25 @@
 ---
+# An empty registry makes the whole role a no-op. This is the default: the repo
+# ships placeholders, not someone else's runner names.
+- name: Report that no runners are defined
+  ansible.builtin.debug:
+    msg: >-
+      github_runners is empty — skipping. Add an entry following the
+      <app>-<purpose>-runner convention in
+      roles/github_runner/defaults/main.yml, or generate one with
+      scripts/New-VpsRunner.ps1.
+  when: github_runners | length == 0
+
 - name: Validate runner definitions
   ansible.builtin.assert:
     that:
-      - item.name is defined and item.name | length > 0
+      - item.name is defined
+      - item.name is match('^[a-z0-9][a-z0-9-]*-runner$')
       - item.repo is defined and '/' in item.repo
+      - "'<owner>' not in item.repo"
     fail_msg: >-
-      Each entry in github_runners needs a `name` and an `owner/repo` `repo`.
-      Offending entry: {{ item }}
+      Runner entries need a `name` matching <app>-<purpose>-runner (lowercase,
+      hyphens) and a real `owner/repo`. Offending entry: {{ item }}
     quiet: true
   loop: "{{ github_runners }}"
   loop_control:
@@ -19,6 +32,7 @@
     owner: root
     group: root
     mode: "0755"
+  when: github_runners | length > 0
 
 - name: Create a directory per runner
   ansible.builtin.file:
@@ -48,7 +62,7 @@
 - name: Pull the runner image
   community.docker.docker_compose_v2_pull:
     project_src: "{{ github_runner_base_dir }}/{{ item.name }}"
-    project_name: "runner-{{ item.name }}"
+    project_name: "{{ item.name }}"
   loop: "{{ github_runners }}"
   loop_control:
     label: "{{ item.name }}"
@@ -56,7 +70,7 @@
 - name: Start (or recreate if config changed) each runner
   community.docker.docker_compose_v2:
     project_src: "{{ github_runner_base_dir }}/{{ item.name }}"
-    project_name: "runner-{{ item.name }}"
+    project_name: "{{ item.name }}"
     state: present
     recreate: auto
   loop: "{{ github_runners }}"
@@ -65,7 +79,7 @@
 
 - name: Verify each runner container is running
   community.docker.docker_container_info:
-    name: "runner-{{ item.name }}-runner-1"
+    name: "{{ item.name }}"
   register: _runner_info
   failed_when: >-
     not _runner_info.exists
@@ -74,12 +88,14 @@
   loop_control:
     label: "{{ item.name }}"
 
-# Only after the replacements are confirmed running — losing the old container
-# before the new one registers would leave the repo with no runner at all.
+# Guarded twice over: opt-in, and never when the registry is empty. Removing a
+# working runner with no replacement defined would leave that repo with none.
 - name: Remove superseded pre-Ansible runner containers
   community.docker.docker_container:
     name: "{{ item }}"
     state: absent
     force_kill: false
   loop: "{{ github_runner_legacy_containers }}"
-  when: github_runner_remove_legacy | bool
+  when:
+    - github_runner_remove_legacy | bool
+    - github_runners | length > 0

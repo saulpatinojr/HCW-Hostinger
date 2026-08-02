@@ -29,51 +29,68 @@ but it is one box, and CI load competes with the backend lab for it.
 
 ## Getting a runner for your repo
 
-Every runner on this VPS is defined in one list, so they all get identical
+Every runner on this VPS comes from one list, so they all get identical
 configuration — same image, same pinned version, same Docker socket setup, same
-naming. You do not install a runner yourself; you add an entry and re-run the
-playbook.
+naming. You don't install a runner; you add an entry and re-run the playbook.
 
-**1. Open a PR against HCW-Hostinger** adding your repo to
+### Naming convention
+
+```
+<app>-<purpose>-runner        myapi-ci-runner, personalsite-deploy-runner
+```
+
+The name is used verbatim as the compose project **and** the container name, so
+`docker ps` tells you which repo and which job a container belongs to without
+cross-referencing anything.
+
+**1. Generate your entry.** Run the helper — it prompts for the parts and
+prints correctly-formed YAML:
+
+```powershell
+.\scripts\New-VpsRunner.ps1
+```
+
+```
+  App or repo slug: myapi
+  Purpose:          ci
+  Repo:             saulpatinojr/myapi
+```
+
+**2. Open a PR against HCW-Hostinger** adding the block it printed to
 `infrastructure/ansible/roles/github_runner/defaults/main.yml`:
 
 ```yaml
 github_runners:
-  - name: personal-site
-    repo: saulpatinojr/personal-site
-    labels: "linux,personal-site"
-
-  - name: my-service                      # ← your entry
-    repo: saulpatinojr/my-service
-    labels: "linux,my-service"
+  - name: myapi-ci-runner
+    repo: saulpatinojr/myapi
+    labels: "linux,myapi-ci"
 ```
 
-- `name` — short slug. Becomes the compose project (`runner-my-service`) and the
-  runner's name in GitHub.
+- `name` — `<app>-<purpose>-runner`, lowercase and hyphenated. Validated by the
+  role; a malformed name fails the play rather than producing a mystery container.
 - `repo` — `owner/repo`. The runner registers here.
 - `labels` — how your workflow selects it. **Don't include `self-hosted`**;
   GitHub adds it automatically.
 
-**2. Install the GitHub App on your repo.** The runners authenticate with a
-GitHub App, not a personal token. If the App isn't installed on your repo, the
-container starts, fails to register, and restart-loops. Ask the repo owner to
-add it before merging.
+**3. Install the GitHub App on your repo.** Runners authenticate with a GitHub
+App, not a personal token. Without it on your repo the container starts, fails
+to register, and restart-loops. Ask the repo owner before merging.
 
-**3. Deploy it.** Actions → **Provision VPS** → `tf_action: apply`,
+**4. Deploy it.** Actions → **Provision VPS** → `tf_action: apply`,
 `ansible_tags: runner`. That reconciles every runner in the list and touches
 nothing else — no OS upgrade, no reboot.
 
-**4. Use it.** Select by your own label, not `self-hosted`:
+**5. Use it.** Select by your own label:
 
 ```yaml
 jobs:
   deploy:
-    runs-on: [self-hosted, my-service]
+    runs-on: [self-hosted, myapi-ci]
     timeout-minutes: 15
 ```
 
-Selecting bare `self-hosted` will match *any* runner on the box, including
-other people's. Always add your label.
+Bare `self-hosted` matches *any* runner on the box, including other people's.
+Always add your label.
 
 Always set `timeout-minutes`. It's one machine — a hung job blocks everyone
 else's deploys behind it.
@@ -104,7 +121,7 @@ jobs:
         with:
           api-key: ${{ secrets.HOSTINGER_API_KEY }}
           virtual-machine: ${{ vars.HOSTINGER_VM_ID }}
-          project-name: my-service
+          project-name: myapi
           docker-compose-path: docker-compose.yml
           environment-variables: |
             NODE_ENV=production
@@ -116,7 +133,7 @@ jobs:
 ```yaml
 jobs:
   deploy:
-    runs-on: [self-hosted, my-service]
+    runs-on: [self-hosted, myapi-ci]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -136,8 +153,8 @@ The runner is itself a container. It reaches the host's Docker daemon through a
 mounted socket, and its workspace lives in a named volume:
 
 ```
-inside the runner:   /tmp/runner/work/my-service/my-service
-on the host:         /var/lib/docker/volumes/runner-my-service-work/_data/...
+inside the runner:   /tmp/runner/work/myapi/myapi
+on the host:         /var/lib/docker/volumes/myapi-ci-runner-work/_data/...
 ```
 
 `docker compose` runs *inside* the runner and reads your compose file from
@@ -153,9 +170,9 @@ services:
       - ./config:/etc/app/config     # ❌ silently mounts an empty directory
 ```
 
-...asks the host to mount `/tmp/runner/work/my-service/my-service/config`, which
-doesn't exist on the host. Docker creates it empty and your container starts
-with no config. No error. No warning.
+...asks the host to mount `/tmp/runner/work/myapi/myapi/config`, which doesn't
+exist on the host. Docker creates it empty and your container starts with no
+config. No error. No warning.
 
 `build:` contexts fail the same way — the host daemon can't find your checkout.
 
@@ -177,7 +194,7 @@ volumes:
 - **Named volumes**, not relative bind mounts.
 - **`env_file` / `environment` are safe** — interpolated client-side.
 - Need a real host path? Use an absolute one that exists
-  (`/opt/my-service/config:/etc/app/config`) and create it via Ansible, not
+  (`/opt/myapi/config:/etc/app/config`) and create it via Ansible, not
   from the job.
 
 ---

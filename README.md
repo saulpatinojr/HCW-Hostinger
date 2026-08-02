@@ -30,10 +30,17 @@ concern, for disposable clusters inside CI jobs.
 
 ### Adding a runner for another repo
 
-Runners are a list, so every one gets identical configuration. Add an entry to
-`github_runners` in `roles/github_runner/defaults/main.yml`, make sure the
-GitHub App is installed on that repo, and run `Provision VPS` with
-`ansible_tags: runner`. Full walkthrough in
+Runners are a list, so every one gets identical configuration. Generate a
+correctly-formed entry with
+[`scripts/New-VpsRunner.ps1`](./scripts/New-VpsRunner.ps1) — it prompts for the
+parts and prints the YAML — then add it to `github_runners` in
+`roles/github_runner/defaults/main.yml`, install the GitHub App on that repo,
+and run `Provision VPS` with `ansible_tags: runner`.
+
+Naming convention is `<app>-<purpose>-runner` (e.g. `myapi-ci-runner`), used
+verbatim as the compose project and the container name so `docker ps` is
+self-explanatory. The role validates it and fails the play on a malformed name.
+`github_runners` ships **empty** — fill in your own. Full walkthrough in
 [Deploying to the VPS](./docs/wiki/Deploying-to-the-VPS.md).
 
 ## Layout
@@ -120,17 +127,22 @@ the `gh` snippet at the bottom of that file to push them.
 Both SSH and App keys are base64 because the workflows `base64 -d` them:
 
 ```bash
-base64 -w0 < ~/.ssh/hcw-vps_ci_ed25519  # → VPS_SSH_KEY
+base64 -w0 < ~/.ssh/myapi-ci-key         # → VPS_SSH_KEY
 base64 -w0 < github-app.private-key.pem # → GH_APP_PRIVATE_KEY
 ```
 
-On Windows, [`scripts/New-VpsSshKey.ps1`](./scripts/New-VpsSshKey.ps1) creates a
-key under the `<host>_<purpose>_ed25519` convention, verifies it has no
-passphrase, fixes the file ACL, and can push the secret for you:
+On Windows, [`scripts/New-VpsSshKey.ps1`](./scripts/New-VpsSshKey.ps1) does the
+whole thing. Run it with no arguments and it prompts for the naming parts:
 
 ```powershell
-.\scripts\New-VpsSshKey.ps1 -Purpose ci -SetGitHubSecret -Repo saulpatinojr/HCW-Hostinger
+.\scripts\New-VpsSshKey.ps1
 ```
+
+It creates `<app>-<purpose>-key`, proves the key has no passphrase, fixes the
+Windows ACL, and prints the authorise + encode steps. Add
+`-SetGitHubSecret -Repo owner/repo` to push `VPS_SSH_KEY` directly, or
+`-ArchiveExisting` to move off-convention keys into `~/.ssh/archive/` first
+(nothing is deleted).
 
 Authorised keys are managed declaratively — add the public key to
 `ssh_authorized_keys` in `roles/common/defaults/main.yml` so it survives

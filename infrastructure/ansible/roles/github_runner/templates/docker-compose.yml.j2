@@ -1,6 +1,10 @@
 services:
   runner:
     image: {{ github_runner_image }}
+    # Explicit, so the container is named exactly <app>-<purpose>-runner rather
+    # than compose's <project>-<service>-<index>. `docker ps` then says which
+    # repo and which job the container belongs to with no cross-referencing.
+    container_name: {{ item.name }}
     restart: unless-stopped
     environment:
       RUNNER_SCOPE: repo
@@ -21,4 +25,4 @@ services:
 
 volumes:
   runner_work:
-    name: runner-{{ item.name }}-work
+    name: {{ item.name }}-work
